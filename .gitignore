@@ -37,3 +37,6 @@ output/
 
 # Skill manifest copy — lives in skill workflow, not this repo
 SKILL.md
+
+# Exemplar style templates — local only, may contain real match data
+exemplars/

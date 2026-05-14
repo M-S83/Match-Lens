@@ -18,8 +18,17 @@ import os
 import re
 import sys
 
-SCRIPTS_DIR = r"C:\Users\dbmux\.claude\skills\match-analysis\scripts"
-EXEMPLAR    = r"C:\Users\dbmux\Desktop\Match Lens Jobs\2026-04-11_gorleston_vs_tilbury\flagged_moments.md"
+# SCRIPTS_DIR self-resolves so the script runs from any cwd / any machine.
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Exemplar style template — used to seed the LLM with the report's format.
+# Lives outside the repo (see .gitignore) since real match exemplars contain
+# real team/player data. Override the directory via env var MATCH_LENS_EXEMPLAR_DIR.
+EXEMPLAR_DIR = os.environ.get(
+    "MATCH_LENS_EXEMPLAR_DIR",
+    os.path.join(SCRIPTS_DIR, "exemplars"),
+)
+EXEMPLAR = os.path.join(EXEMPLAR_DIR, "flagged_moments.md")
 
 sys.path.insert(0, SCRIPTS_DIR)
 from pipeline_accessors import get_source_limitations_note
@@ -142,8 +151,17 @@ def generate(match_dir: str) -> None:
         source_type = sp.get("source_type", source_type)
         source_note = get_source_limitations_note(sp)
 
-    with open(EXEMPLAR, encoding="utf-8") as f:
-        exemplar = f.read()
+    # Warn-and-continue if exemplar is missing — losing the style template
+    # degrades report quality but should not crash the pipeline.
+    if os.path.exists(EXEMPLAR):
+        with open(EXEMPLAR, encoding="utf-8") as f:
+            exemplar = f.read()
+    else:
+        print(f"  [WARN] Exemplar not found at {EXEMPLAR}")
+        print(f"  [WARN] Set MATCH_LENS_EXEMPLAR_DIR or place flagged_moments.md "
+              f"in {EXEMPLAR_DIR}")
+        print(f"  [WARN] Proceeding without exemplar — report style may suffer")
+        exemplar = ""
 
     roster   = build_roster_block(mc)
     data_str = _summarise_bundle(bundle)

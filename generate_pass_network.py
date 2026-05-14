@@ -22,8 +22,17 @@ import os
 import sys
 from collections import Counter, defaultdict
 
-SCRIPTS_DIR = r"C:\Users\dbmux\.claude\skills\match-analysis\scripts"
-EXEMPLAR    = r"C:\Users\dbmux\Desktop\Match Lens Jobs\2026-04-11_gorleston_vs_tilbury\pass_network.md"
+# SCRIPTS_DIR self-resolves so the script runs from any cwd / any machine.
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Exemplar style template — used to seed the LLM with the report's format.
+# Lives outside the repo (see .gitignore) since real match exemplars contain
+# real team/player data. Override the directory via env var MATCH_LENS_EXEMPLAR_DIR.
+EXEMPLAR_DIR = os.environ.get(
+    "MATCH_LENS_EXEMPLAR_DIR",
+    os.path.join(SCRIPTS_DIR, "exemplars"),
+)
+EXEMPLAR = os.path.join(EXEMPLAR_DIR, "pass_network.md")
 
 sys.path.insert(0, SCRIPTS_DIR)
 from pipeline_accessors import get_source_limitations_note
@@ -139,8 +148,16 @@ def generate_pass_network(match_dir: str) -> str:
     stats     = compute_stats(sequences, home_team, away_team)
     stats_str = json.dumps(stats, indent=2)
 
-    with open(EXEMPLAR, encoding="utf-8") as f:
-        exemplar = f.read()
+    # Warn-and-continue if exemplar is missing.
+    if os.path.exists(EXEMPLAR):
+        with open(EXEMPLAR, encoding="utf-8") as f:
+            exemplar = f.read()
+    else:
+        print(f"  [WARN] Exemplar not found at {EXEMPLAR}")
+        print(f"  [WARN] Set MATCH_LENS_EXEMPLAR_DIR or place pass_network.md "
+              f"in {EXEMPLAR_DIR}")
+        print(f"  [WARN] Proceeding without exemplar — report style may suffer")
+        exemplar = ""
 
     system_prompt = f"""
 You are writing pass_network.md for a football match analysed by the
