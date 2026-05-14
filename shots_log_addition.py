@@ -5,6 +5,7 @@
 
 import json, os, glob
 from pathlib import Path
+from pipeline_accessors import get_window_id
 
 
 def build_shots_log(match_dir: str) -> dict:
@@ -206,7 +207,7 @@ def build_shots_log(match_dir: str) -> dict:
 
         # ── Try to enrich from event agent output ─────────────────────────
         window     = _window_for_minute(minute)
-        window_id  = window.get("window_id", window.get("agent_id", ""))
+        window_id  = get_window_id(window)
 
         if window_id:
             ev_output = _load_event_output(window_id)

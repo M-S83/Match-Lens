@@ -15,6 +15,7 @@ Progress:
 import glob, json, os, sys, time, argparse
 from pathlib import Path
 from dotenv import load_dotenv
+from pipeline_accessors import get_window_id
 
 # Fix 42: bump on every fix. Surfaced into the report manifest (Section 5).
 MATCH_LENS_VERSION = "0.42"
@@ -158,7 +159,7 @@ def get_window_frames(match_dir: str, window: dict, n: int) -> list:
     Supports both subdirectory layout (frames/01/) and flat layout (frames/).
     In flat layout, filters by window start_s / end_s using filename timestamp.
     """
-    window_id  = window.get("agent_id", window.get("window_id", ""))
+    window_id  = get_window_id(window)
     start_s    = window.get("start_s", window.get("start_seconds", 0))
     end_s      = window.get("end_s",   window.get("end_seconds",   start_s + 300))
 
@@ -769,7 +770,7 @@ Central play only: defending_third / middle / attacking_third.
     score_h     = ms["home_score"]
     score_a     = ms["away_score"]
     match_state = ms["state"]
-    window_id   = window.get("window_id", window.get("agent_id", ""))
+    window_id   = get_window_id(window)
 
     # Fix 33b: use explicit home/away naming. Reports cover both teams
     # independently; there is no single "focus" perspective at prompt time.
@@ -841,7 +842,7 @@ def build_player_prompt(match_dir: str, window: dict, mc: dict,
     source_profile = _load_source_profile(match_dir)
     source_block   = _source_capability_block(source_profile)
     kit_block      = _kit_identification_block(mc)
-    window_id      = window.get("window_id", window.get("agent_id", ""))
+    window_id      = get_window_id(window)
 
     # Fix 33b: explicit home/away naming. No single "focus" perspective.
     _home_p     = mc.get("home_team", "")
@@ -1211,7 +1212,7 @@ def run_pipeline(match_dir: str, quality: str = "standard",
 
     windows     = wp.get("windows", [])
     # Cast to str so window_ids match JSON state keys (always strings).
-    window_ids  = [str(w.get("window_id", w.get("agent_id"))) for w in windows]
+    window_ids  = [str(get_window_id(w)) for w in windows]
     profile     = QUALITY_PROFILES[quality]
     fpw         = profile["frames_per_window"]
     evf         = profile["event_frames"]
@@ -1312,7 +1313,7 @@ def run_pipeline(match_dir: str, quality: str = "standard",
         requests = []
         for wid in pending_3a:
             win = next((w for w in windows
-                        if str(w.get("window_id", w.get("agent_id"))) == str(wid)), {})
+                        if str(get_window_id(w)) == str(wid)), {})
             frames  = get_window_frames(match_dir, win, fpw)
             prompt  = build_structural_prompt(match_dir, win, mc, state,
                                               blind_formation=args.blind_formation)
@@ -1338,7 +1339,7 @@ def run_pipeline(match_dir: str, quality: str = "standard",
             if wid not in pending_3b:
                 continue
             win = next((w for w in windows
-                        if str(w.get("window_id", w.get("agent_id"))) == str(wid)), {})
+                        if str(get_window_id(w)) == str(wid)), {})
             frames  = get_window_frames(match_dir, win, fpw)
 
             # Fix 33a A+B2: load THIS window's structural output to seed the
@@ -1444,7 +1445,7 @@ def run_pipeline(match_dir: str, quality: str = "standard",
         requests = []
         for wid in event_windows_pending:
             win    = next((w for w in windows
-                           if str(w.get("window_id", w.get("agent_id"))) == str(wid)), {})
+                           if str(get_window_id(w)) == str(wid)), {})
             frames = get_window_frames(match_dir, win, evf)
 
             # Get structural context from 3a output (filename includes window label)
@@ -2041,7 +2042,7 @@ def _window_has_event(wid: str, events: list, windows: list) -> bool:
     Falls back to time-range matching if flag is absent.
     """
     win = next((w for w in windows
-                if str(w.get("window_id", w.get("agent_id"))) == str(wid)), {})
+                if str(get_window_id(w)) == str(wid)), {})
     # Primary: use the flag already set in window_plan
     if "event_window" in win:
         return bool(win["event_window"])
