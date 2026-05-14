@@ -26,39 +26,8 @@ import os
 import re as _re
 import sys
 import glob
+from pipeline_paths import find_agent_output as _find_agent_file
 from datetime import datetime
-
-
-def _find_agent_file(logs_dir: str, wid, suffix: str) -> "str | None":
-    """
-    Find an agent output file matching any known naming convention.
-
-    Writers across pipeline versions have used different agent ID conventions
-    (bare wid, zero-padded, "agent_NN" prefix). This finder accepts any of
-    them and returns the first matching file, or None.
-    """
-    wid_str    = str(wid).lstrip("agent_")  # strip if caller passed "agent_01"
-    wid_padded = wid_str.zfill(2) if wid_str.isdigit() else wid_str
-
-    patterns = [
-        f"agent_{wid_str}_{suffix}.json",
-        f"agent_{wid_padded}_{suffix}.json",
-        f"agent_{wid_str}_*_{suffix}.json",
-        f"agent_{wid_padded}_*_{suffix}.json",
-        f"*_{wid_str}_*_{suffix}.json",
-        f"*_{wid_padded}_*_{suffix}.json",
-    ]
-
-    for pattern in patterns:
-        matches = [m for m in glob.glob(os.path.join(logs_dir, pattern))
-                   if "_merged" not in os.path.basename(m)
-                   and "_rerun" not in os.path.basename(m)
-                   and "agentB" not in os.path.basename(m)]
-        if matches:
-            # Prefer canonical names (no extra label segment) when multiple match.
-            matches.sort(key=lambda p: len(os.path.basename(p)))
-            return matches[0]
-    return None
 
 
 # -- Numeric and categorical merge helpers -------------------------------------

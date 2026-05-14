@@ -16,6 +16,7 @@ import glob, json, os, sys, time, argparse
 from pathlib import Path
 from dotenv import load_dotenv
 from pipeline_accessors import get_window_id
+from pipeline_paths import find_agent_output, find_merged_window
 
 # Fix 42: bump on every fix. Surfaced into the report manifest (Section 5).
 MATCH_LENS_VERSION = "0.42"
@@ -1342,15 +1343,17 @@ def run_pipeline(match_dir: str, quality: str = "standard",
                         if str(get_window_id(w)) == str(wid)), {})
             frames  = get_window_frames(match_dir, win, fpw)
 
-            # Fix 33a A+B2: load THIS window's structural output to seed the
-            # SKILL.md-mandated STRUCTURAL CONTEXT block in the player prompt.
-            structural_path = os.path.join(
-                match_dir, "agent_logs", f"agent_{wid}_structural.json"
-            )
+            # Fix 33a A+B2 + F2: previously used exact path
+            # agent_{wid}_structural.json which never matched (batch_runner
+            # writes labeled filenames), so structural_context was always {}
+            # and player prompts shipped with no structural seeding.
             structural_context = {}
-            if os.path.exists(structural_path):
+            _structural_path = find_agent_output(
+                os.path.join(match_dir, "agent_logs"), wid, "structural"
+            )
+            if _structural_path:
                 try:
-                    with open(structural_path, encoding="utf-8") as _f:
+                    with open(_structural_path, encoding="utf-8") as _f:
                         structural_context = json.load(_f)
                 except Exception:
                     pass
@@ -1449,11 +1452,12 @@ def run_pipeline(match_dir: str, quality: str = "standard",
             frames = get_window_frames(match_dir, win, evf)
 
             # Get structural context from 3a output (filename includes window label)
-            a_files    = _glob.glob(os.path.join(match_dir, "agent_logs",
-                                                  f"agent_{wid}_*_structural.json"))
+            a_file = find_agent_output(
+                os.path.join(match_dir, "agent_logs"), wid, "structural"
+            )
             struct_ctx = ""
-            if a_files:
-                with open(a_files[0], encoding="utf-8") as f:
+            if a_file:
+                with open(a_file, encoding="utf-8") as f:
                     a = json.load(f)
                 struct_ctx = (f"Formation: {a.get('formation',{}).get('shape_in_possession')}, "
                               f"Line: {a.get('defensive_line',{}).get('avg_pct')}%")
@@ -1577,18 +1581,13 @@ def run_pipeline(match_dir: str, quality: str = "standard",
                     if _padding <= 0:
                         _padding = 3.0
 
-                    # Find the matching merged window file (glob because naming
-                    # may include label suffix: agent_agent_07_W07_..._merged.json)
-                    _merged_candidates = sorted(
-                        glob.glob(os.path.join(
-                            match_dir, "agent_logs",
-                            f"agent_{_window_id}*_merged.json"
-                        ))
+                    # Find merged window via canonical lookup
+                    _merged_path = find_merged_window(
+                        os.path.join(match_dir, "agent_logs"), _window_id
                     )
-                    if not _merged_candidates:
+                    if _merged_path is None:
                         _sp_skipped.append((_anchor_ts, "no_merged_file"))
                         continue
-                    _merged_path = _merged_candidates[0]
 
                     with open(_merged_path, encoding="utf-8") as _f:
                         _merged = json.load(_f)

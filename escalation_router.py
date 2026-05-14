@@ -22,6 +22,7 @@ import os
 import sys
 import glob
 from datetime import datetime
+from pipeline_paths import find_all_merged_windows
 
 
 STANDARD_CAP_HIGH   = 10
@@ -161,15 +162,11 @@ def build_escalation_queue(match_dir: str) -> dict:
 
     # Collect all queue items from merged window JSONs
     raw_items = []
-    # Check both naming conventions used by pipeline_runner.py
-    merged_paths = (
-        sorted(glob.glob(os.path.join(logs_dir, "*_merged.json"))) +
-        sorted(glob.glob(os.path.join(match_dir, "merged_windows", "merged_*.json"))) +
-        sorted(glob.glob(os.path.join(logs_dir, "agent_*_merged.json")))
+    # Find all merged windows, including legacy v1 merged_windows/ dir
+    merged_paths = find_all_merged_windows(
+        logs_dir,
+        extra_dirs=[os.path.join(match_dir, "merged_windows")],
     )
-    # Deduplicate
-    seen = set()
-    merged_paths = [p for p in merged_paths if not (p in seen or seen.add(p))]
     for path in merged_paths:
         with open(path, encoding="utf-8") as f:
             w = json.load(f)

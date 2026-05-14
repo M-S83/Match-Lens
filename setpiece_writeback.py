@@ -20,6 +20,7 @@ import glob
 import json
 import os
 from datetime import datetime
+from pipeline_paths import find_merged_window
 
 # Fields the burst confirms (1fps read them; 5fps re-reads for accuracy)
 BURST_CONFIRMS = {"bodies_in_box", "delivery_zone", "marking_system", "outcome"}
@@ -233,18 +234,12 @@ def writeback_all_bursts(match_dir: str, summary_path: "str | None" = None,
             errors.append(f"{base}: no window field")
             continue
 
-        # Direct path first; glob fallback for label-suffixed filenames.
-        merged_path = os.path.join(logs_dir, f"agent_{window_id}_merged.json")
-        if not os.path.exists(merged_path):
-            candidates = (
-                glob.glob(os.path.join(logs_dir, f"agent_{window_id}*_merged.json")) +
-                glob.glob(os.path.join(logs_dir, f"*_{window_id}_*_merged.json"))
-            )
-            if not candidates:
-                print(f"  [WB] Skip {base}: no merged file for window {window_id!r}")
-                errors.append(f"{base}: no merged file for window {window_id!r}")
-                continue
-            merged_path = candidates[0]
+        # Find merged file via canonical lookup (handles label suffixes).
+        merged_path = find_merged_window(logs_dir, window_id)
+        if merged_path is None:
+            print(f"  [WB] Skip {base}: no merged file for window {window_id!r}")
+            errors.append(f"{base}: no merged file for window {window_id!r}")
+            continue
 
         try:
             ok = writeback_burst(burst_path, merged_path, _summary, queue_path)
