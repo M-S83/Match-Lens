@@ -1,0 +1,644 @@
+{
+  "_version": "1.0",
+  "_description": "Result family gate rules per source type. Values: allowed | downgraded | suppressed. Visibility override rules apply on top of base rules when scored dimensions fall below thresholds.",
+  "tactical_wide_static": {
+    "description": "Fixed wide-angle camera covering the full pitch. Best source for structural analysis.",
+    "strongest_for": [
+      "shape",
+      "spacing",
+      "territory",
+      "rest_defence",
+      "set_pieces",
+      "phase",
+      "build_up"
+    ],
+    "weakest_for": [
+      "player_technical_actions",
+      "player_duels"
+    ],
+    "result_family_rules": {
+      "shape": "allowed",
+      "spacing": "allowed",
+      "territory": "allowed",
+      "phase": "allowed",
+      "pressing": "allowed",
+      "build_up": "allowed",
+      "rest_defence": "allowed",
+      "transitions": "allowed",
+      "chance_patterns": "allowed",
+      "set_pieces": "allowed",
+      "local_duels": "downgraded",
+      "line_breaking_actions": "allowed",
+      "box_entries": "allowed",
+      "opposition_identity": "allowed",
+      "opposition_structure": "allowed",
+      "opposition_patterns": "allowed",
+      "opposition_build_up": "allowed",
+      "opposition_pressing": "allowed",
+      "opposition_transitions": "allowed",
+      "opposition_strengths": "allowed",
+      "opposition_weaknesses": "allowed",
+      "player_role": "allowed",
+      "player_positioning": "allowed",
+      "player_movement": "downgraded",
+      "player_decision_making": "downgraded",
+      "player_duels": "downgraded",
+      "player_technical_actions": "downgraded",
+      "player_line_breaking_contributions": "downgraded"
+    },
+    "visibility_override_rules": {
+      "if_full_pitch_visibility_below_0.4": {
+        "shape": "downgraded",
+        "spacing": "downgraded",
+        "territory": "downgraded",
+        "rest_defence": "downgraded",
+        "opposition_structure": "downgraded"
+      },
+      "if_weakside_visibility_below_0.3": {
+        "spacing": "downgraded",
+        "rest_defence": "downgraded",
+        "opposition_structure": "downgraded",
+        "opposition_weaknesses": "downgraded"
+      },
+      "if_stability_score_above_0.6": {
+        "transitions": "downgraded"
+      }
+    },
+    "padding_overrides": {}
+  },
+  "tactical_wide_auto_tracking": {
+    "description": "Auto-tracking wide camera. Follows action; pitch visibility varies by crop tightness.",
+    "strongest_for": [
+      "pressing",
+      "build_up",
+      "transitions",
+      "chance_patterns"
+    ],
+    "weakest_for": [
+      "spacing",
+      "rest_defence",
+      "opposition_structure"
+    ],
+    "result_family_rules": {
+      "shape": "downgraded",
+      "spacing": "downgraded",
+      "territory": "downgraded",
+      "phase": "downgraded",
+      "pressing": "allowed",
+      "build_up": "allowed",
+      "rest_defence": "downgraded",
+      "transitions": "allowed",
+      "chance_patterns": "allowed",
+      "set_pieces": "downgraded",
+      "local_duels": "allowed",
+      "line_breaking_actions": "allowed",
+      "box_entries": "allowed",
+      "opposition_identity": "allowed",
+      "opposition_structure": "downgraded",
+      "opposition_patterns": "downgraded",
+      "opposition_build_up": "allowed",
+      "opposition_pressing": "allowed",
+      "opposition_transitions": "allowed",
+      "opposition_strengths": "downgraded",
+      "opposition_weaknesses": "downgraded",
+      "player_role": "downgraded",
+      "player_positioning": "downgraded",
+      "player_movement": "allowed",
+      "player_decision_making": "allowed",
+      "player_duels": "allowed",
+      "player_technical_actions": "downgraded",
+      "player_line_breaking_contributions": "allowed"
+    },
+    "visibility_override_rules": {
+      "if_full_pitch_visibility_below_0.5": {
+        "shape": "downgraded",
+        "spacing": "downgraded",
+        "territory": "downgraded",
+        "rest_defence": "downgraded",
+        "opposition_structure": "downgraded"
+      },
+      "if_weakside_visibility_below_0.3": {
+        "spacing": "downgraded",
+        "opposition_weaknesses": "downgraded"
+      }
+    },
+    "padding_overrides": {},
+    "source_note": "Auto-tracking may crop to active zone \u2014 full-pitch structure approximate when camera is tight"
+  },
+  "veo_ball_tracking": {
+    "description": "Veo or similar ball-tracking system. Camera follows the ball. Reliable only near-ball.",
+    "strongest_for": [
+      "local_duels",
+      "box_entries",
+      "chance_patterns",
+      "transitions",
+      "player_technical_actions"
+    ],
+    "weakest_for": [
+      "shape",
+      "spacing",
+      "territory",
+      "rest_defence",
+      "opposition_structure"
+    ],
+    "result_family_rules": {
+      "shape": "downgraded",
+      "spacing": "downgraded",
+      "territory": "downgraded",
+      "phase": "downgraded",
+      "pressing": "downgraded",
+      "build_up": "downgraded",
+      "rest_defence": "downgraded",
+      "transitions": "downgraded",
+      "chance_patterns": "allowed",
+      "set_pieces": "downgraded",
+      "local_duels": "allowed",
+      "line_breaking_actions": "allowed",
+      "box_entries": "allowed",
+      "opposition_identity": "downgraded",
+      "opposition_structure": "downgraded",
+      "opposition_patterns": "downgraded",
+      "opposition_build_up": "downgraded",
+      "opposition_pressing": "downgraded",
+      "opposition_transitions": "allowed",
+      "opposition_strengths": "downgraded",
+      "opposition_weaknesses": "downgraded",
+      "player_role": "downgraded",
+      "player_positioning": "downgraded",
+      "player_movement": "allowed",
+      "player_decision_making": "allowed",
+      "player_duels": "allowed",
+      "player_technical_actions": "allowed",
+      "player_line_breaking_contributions": "allowed"
+    },
+    "visibility_override_rules": {
+      "if_full_pitch_visibility_above_0.7": {
+        "shape": "allowed",
+        "territory": "allowed",
+        "opposition_structure": "allowed",
+        "spacing": "allowed",
+        "rest_defence": "downgraded"
+      },
+      "if_ball_follow_bias_above_0.9": {
+        "shape": "downgraded",
+        "spacing": "downgraded",
+        "territory": "downgraded"
+      },
+      "if_weakside_visibility_score_below_0.15": {
+        "spacing": "downgraded",
+        "territory": "downgraded"
+      }
+    },
+    "padding_overrides": {
+      "transitions": 3,
+      "box_entries": 3
+    },
+    "limitation_notes": {
+      "shape": "Visible zone only \u2014 shape readable near ball; far-side structure and full formation not confirmed",
+      "spacing": "Visible zone only \u2014 spacing readable between in-frame players; far-side spacing not observable",
+      "territory": "Zone readable when ball is clearly in attacking or defending third; mid-pitch gradations approximate",
+      "rest_defence": "Immediate transition response visible when ball is lost near camera; far-end defensive recovery not confirmed",
+      "opposition_structure": "Near-ball structure readable; full opposition shape requires wide coverage",
+      "player_role": "In-zone role observable; off-ball positioning habits when out of frame not confirmable",
+      "phase": "Phase readable in visible zone; full-team phase transitions not confirmed",
+      "pressing": "Near-ball press visible and scoreable; far-side press triggers and cover shadows not confirmed",
+      "build_up": "Build-up observable when in frame; full team build-up shape limited by coverage",
+      "transitions": "Transitions visible when occurring near camera; far-end transitions not observed",
+      "set_pieces": "Set piece structure readable \u2014 most players cluster in small area; deliveries and outcomes confirmable"
+    }
+  },
+  "drone_high_wide": {
+    "description": "High-altitude drone with wide coverage. Strong for shape/compactness if stable and high enough.",
+    "strongest_for": [
+      "shape",
+      "spacing",
+      "phase",
+      "set_pieces"
+    ],
+    "weakest_for": [
+      "player_technical_actions",
+      "player_duels"
+    ],
+    "result_family_rules": {
+      "shape": "allowed",
+      "spacing": "allowed",
+      "territory": "allowed",
+      "phase": "allowed",
+      "pressing": "allowed",
+      "build_up": "allowed",
+      "rest_defence": "allowed",
+      "transitions": "downgraded",
+      "chance_patterns": "downgraded",
+      "set_pieces": "allowed",
+      "local_duels": "downgraded",
+      "line_breaking_actions": "downgraded",
+      "box_entries": "downgraded",
+      "opposition_identity": "allowed",
+      "opposition_structure": "allowed",
+      "opposition_patterns": "allowed",
+      "opposition_build_up": "allowed",
+      "opposition_pressing": "allowed",
+      "opposition_transitions": "downgraded",
+      "opposition_strengths": "allowed",
+      "opposition_weaknesses": "allowed",
+      "player_role": "allowed",
+      "player_positioning": "allowed",
+      "player_movement": "downgraded",
+      "player_decision_making": "downgraded",
+      "player_duels": "downgraded",
+      "player_technical_actions": "downgraded",
+      "player_line_breaking_contributions": "downgraded"
+    },
+    "visibility_override_rules": {
+      "if_stability_score_above_0.5": {
+        "shape": "downgraded",
+        "transitions": "downgraded"
+      },
+      "if_orientation_consistency_score_below_0.5": {
+        "shape": "downgraded",
+        "spacing": "downgraded",
+        "territory": "downgraded"
+      }
+    },
+    "padding_overrides": {},
+    "source_note": "Player identity not reliable at altitude \u2014 shape and structure readings are strong"
+  },
+  "drone_follow": {
+    "description": "Follow drone tracking action. Local coverage only. Limited structural value.",
+    "strongest_for": [
+      "local_duels",
+      "box_entries",
+      "transitions",
+      "chance_patterns"
+    ],
+    "weakest_for": [
+      "shape",
+      "spacing",
+      "territory",
+      "rest_defence",
+      "opposition_structure"
+    ],
+    "result_family_rules": {
+      "shape": "downgraded",
+      "spacing": "downgraded",
+      "territory": "downgraded",
+      "phase": "downgraded",
+      "pressing": "downgraded",
+      "build_up": "downgraded",
+      "rest_defence": "downgraded",
+      "transitions": "allowed",
+      "chance_patterns": "allowed",
+      "set_pieces": "downgraded",
+      "local_duels": "allowed",
+      "line_breaking_actions": "allowed",
+      "box_entries": "allowed",
+      "opposition_identity": "downgraded",
+      "opposition_structure": "downgraded",
+      "opposition_patterns": "downgraded",
+      "opposition_build_up": "downgraded",
+      "opposition_pressing": "downgraded",
+      "opposition_transitions": "allowed",
+      "opposition_strengths": "downgraded",
+      "opposition_weaknesses": "downgraded",
+      "player_role": "downgraded",
+      "player_positioning": "downgraded",
+      "player_movement": "allowed",
+      "player_decision_making": "allowed",
+      "player_duels": "allowed",
+      "player_technical_actions": "allowed",
+      "player_line_breaking_contributions": "allowed"
+    },
+    "visibility_override_rules": {},
+    "padding_overrides": {
+      "transitions": 3,
+      "box_entries": 3
+    },
+    "source_note": "Camera follows play \u2014 shape and spacing zone-limited to visible area"
+  },
+  "dual_panoramic": {
+    "description": "Two stacked half-pitch views. Split-aware interpretation required. Cannot merge halves spatially.",
+    "split_aware": true,
+    "strongest_for": [
+      "shape_per_half",
+      "set_pieces",
+      "rest_defence_per_half"
+    ],
+    "weakest_for": [
+      "territory",
+      "spacing_cross_pitch",
+      "global_field_tilt"
+    ],
+    "result_family_rules": {
+      "shape": "downgraded",
+      "spacing": "downgraded",
+      "territory": "downgraded",
+      "phase": "downgraded",
+      "pressing": "downgraded",
+      "build_up": "downgraded",
+      "rest_defence": "downgraded",
+      "transitions": "downgraded",
+      "chance_patterns": "downgraded",
+      "set_pieces": "allowed",
+      "local_duels": "downgraded",
+      "line_breaking_actions": "downgraded",
+      "box_entries": "downgraded",
+      "opposition_identity": "downgraded",
+      "opposition_structure": "downgraded",
+      "opposition_patterns": "downgraded",
+      "opposition_build_up": "downgraded",
+      "opposition_pressing": "downgraded",
+      "opposition_transitions": "downgraded",
+      "opposition_strengths": "downgraded",
+      "opposition_weaknesses": "downgraded",
+      "player_role": "downgraded",
+      "player_positioning": "downgraded",
+      "player_movement": "downgraded",
+      "player_decision_making": "downgraded",
+      "player_duels": "downgraded",
+      "player_technical_actions": "downgraded",
+      "player_line_breaking_contributions": "downgraded"
+    },
+    "visibility_override_rules": {
+      "if_split_confirmed_false": {
+        "shape": "downgraded",
+        "spacing": "downgraded",
+        "rest_defence": "downgraded",
+        "opposition_structure": "downgraded"
+      }
+    },
+    "padding_overrides": {},
+    "source_note": "Two half-pitch views \u2014 cross-pitch spatial claims require both panels to be in frame"
+  },
+  "behind_goal": {
+    "description": "Fixed behind-goal camera. Good for central compactness, weak for width/far-side.",
+    "strongest_for": [
+      "set_pieces",
+      "box_entries",
+      "local_duels"
+    ],
+    "weakest_for": [
+      "spacing",
+      "territory",
+      "shape",
+      "opposition_structure"
+    ],
+    "result_family_rules": {
+      "shape": "downgraded",
+      "spacing": "downgraded",
+      "territory": "downgraded",
+      "phase": "downgraded",
+      "pressing": "downgraded",
+      "build_up": "downgraded",
+      "rest_defence": "downgraded",
+      "transitions": "downgraded",
+      "chance_patterns": "allowed",
+      "set_pieces": "allowed",
+      "local_duels": "allowed",
+      "line_breaking_actions": "downgraded",
+      "box_entries": "allowed",
+      "opposition_identity": "downgraded",
+      "opposition_structure": "downgraded",
+      "opposition_patterns": "downgraded",
+      "opposition_build_up": "downgraded",
+      "opposition_pressing": "downgraded",
+      "opposition_transitions": "downgraded",
+      "opposition_strengths": "downgraded",
+      "opposition_weaknesses": "downgraded",
+      "player_role": "downgraded",
+      "player_positioning": "downgraded",
+      "player_movement": "downgraded",
+      "player_decision_making": "downgraded",
+      "player_duels": "allowed",
+      "player_technical_actions": "allowed",
+      "player_line_breaking_contributions": "downgraded"
+    },
+    "visibility_override_rules": {},
+    "padding_overrides": {},
+    "source_note": "End-on viewing angle severely limits shape and line readings \u2014 findings are approximate and based on relative player positions, not absolute pitch distances"
+  },
+  "broadcast_tv": {
+    "description": "Broadcast television feed. Good for event storytelling, poor for full-team structural analysis.",
+    "strongest_for": [
+      "chance_patterns",
+      "local_duels",
+      "box_entries",
+      "player_technical_actions"
+    ],
+    "weakest_for": [
+      "shape",
+      "spacing",
+      "territory",
+      "rest_defence",
+      "opposition_structure",
+      "player_role"
+    ],
+    "result_family_rules": {
+      "shape": "downgraded",
+      "spacing": "downgraded",
+      "territory": "downgraded",
+      "phase": "downgraded",
+      "pressing": "downgraded",
+      "build_up": "downgraded",
+      "rest_defence": "downgraded",
+      "transitions": "downgraded",
+      "chance_patterns": "allowed",
+      "set_pieces": "downgraded",
+      "local_duels": "allowed",
+      "line_breaking_actions": "allowed",
+      "box_entries": "allowed",
+      "opposition_identity": "downgraded",
+      "opposition_structure": "downgraded",
+      "opposition_patterns": "downgraded",
+      "opposition_build_up": "downgraded",
+      "opposition_pressing": "downgraded",
+      "opposition_transitions": "downgraded",
+      "opposition_strengths": "downgraded",
+      "opposition_weaknesses": "downgraded",
+      "player_role": "downgraded",
+      "player_positioning": "downgraded",
+      "player_movement": "downgraded",
+      "player_decision_making": "downgraded",
+      "player_duels": "allowed",
+      "player_technical_actions": "allowed",
+      "player_line_breaking_contributions": "downgraded"
+    },
+    "visibility_override_rules": {},
+    "padding_overrides": {},
+    "source_note": "Broadcast framing follows action \u2014 full-team structure visible only during wide moments"
+  },
+  "tracking_overlay": {
+    "description": "Tracking data overlaid on video. Useful for fast action and movement review. Still needs visibility checks.",
+    "strongest_for": [
+      "player_movement",
+      "transitions",
+      "local_duels",
+      "player_decision_making"
+    ],
+    "weakest_for": [
+      "player_technical_actions"
+    ],
+    "result_family_rules": {
+      "shape": "downgraded",
+      "spacing": "downgraded",
+      "territory": "downgraded",
+      "phase": "downgraded",
+      "pressing": "allowed",
+      "build_up": "allowed",
+      "rest_defence": "downgraded",
+      "transitions": "allowed",
+      "chance_patterns": "allowed",
+      "set_pieces": "downgraded",
+      "local_duels": "allowed",
+      "line_breaking_actions": "allowed",
+      "box_entries": "allowed",
+      "opposition_identity": "downgraded",
+      "opposition_structure": "downgraded",
+      "opposition_patterns": "downgraded",
+      "opposition_build_up": "allowed",
+      "opposition_pressing": "allowed",
+      "opposition_transitions": "allowed",
+      "opposition_strengths": "downgraded",
+      "opposition_weaknesses": "downgraded",
+      "player_role": "downgraded",
+      "player_positioning": "allowed",
+      "player_movement": "allowed",
+      "player_decision_making": "allowed",
+      "player_duels": "allowed",
+      "player_technical_actions": "downgraded",
+      "player_line_breaking_contributions": "allowed"
+    },
+    "visibility_override_rules": {
+      "if_occlusion_score_above_0.5": {
+        "player_movement": "downgraded",
+        "player_decision_making": "downgraded"
+      }
+    },
+    "padding_overrides": {}
+  },
+  "unknown": {
+    "description": "Source type could not be classified. Conservative gates applied to all structural families.",
+    "strongest_for": [],
+    "weakest_for": [
+      "shape",
+      "spacing",
+      "territory",
+      "rest_defence",
+      "opposition_structure"
+    ],
+    "result_family_rules": {
+      "shape": "downgraded",
+      "spacing": "downgraded",
+      "territory": "downgraded",
+      "phase": "downgraded",
+      "pressing": "downgraded",
+      "build_up": "downgraded",
+      "rest_defence": "downgraded",
+      "transitions": "downgraded",
+      "chance_patterns": "allowed",
+      "set_pieces": "downgraded",
+      "local_duels": "allowed",
+      "line_breaking_actions": "downgraded",
+      "box_entries": "allowed",
+      "opposition_identity": "downgraded",
+      "opposition_structure": "downgraded",
+      "opposition_patterns": "downgraded",
+      "opposition_build_up": "downgraded",
+      "opposition_pressing": "downgraded",
+      "opposition_transitions": "downgraded",
+      "opposition_strengths": "downgraded",
+      "opposition_weaknesses": "downgraded",
+      "player_role": "downgraded",
+      "player_positioning": "downgraded",
+      "player_movement": "downgraded",
+      "player_decision_making": "downgraded",
+      "player_duels": "downgraded",
+      "player_technical_actions": "downgraded",
+      "player_line_breaking_contributions": "downgraded"
+    },
+    "visibility_override_rules": {},
+    "padding_overrides": {},
+    "source_note": "Source type unknown \u2014 all structural findings are approximate; verify against footage"
+  },
+  "_escalation_rules": {
+    "transitions": {
+      "target_fps": 5,
+      "reason": "fast_event",
+      "default_padding_s": 5
+    },
+    "counterpress": {
+      "target_fps": 5,
+      "reason": "fast_event",
+      "default_padding_s": 5
+    },
+    "box_entries": {
+      "target_fps": 5,
+      "reason": "fast_event",
+      "default_padding_s": 3
+    },
+    "line_breaking_actions": {
+      "target_fps": 5,
+      "reason": "fast_event",
+      "default_padding_s": 5
+    },
+    "local_duels": {
+      "target_fps": 5,
+      "reason": "fast_event",
+      "default_padding_s": 3
+    },
+    "pressing": {
+      "target_fps": 3,
+      "reason": "uncertainty",
+      "default_padding_s": 5
+    },
+    "build_up": {
+      "target_fps": 3,
+      "reason": "uncertainty",
+      "default_padding_s": 8
+    },
+    "chance_patterns": {
+      "target_fps": 3,
+      "reason": "uncertainty",
+      "default_padding_s": 5
+    },
+    "phase": {
+      "target_fps": 3,
+      "reason": "uncertainty",
+      "default_padding_s": 5
+    },
+    "opposition_transitions": {
+      "target_fps": 5,
+      "reason": "fast_event",
+      "default_padding_s": 5
+    },
+    "opposition_pressing": {
+      "target_fps": 3,
+      "reason": "uncertainty",
+      "default_padding_s": 5
+    },
+    "player_duels": {
+      "target_fps": 5,
+      "reason": "fast_event",
+      "default_padding_s": 3
+    },
+    "player_movement": {
+      "target_fps": 3,
+      "reason": "uncertainty",
+      "default_padding_s": 5
+    },
+    "goal": {
+      "target_fps": 5,
+      "reason": "importance",
+      "default_padding_s": 6
+    },
+    "gk_claim": {
+      "target_fps": 3,
+      "reason": "uncertainty",
+      "default_padding_s": 3
+    },
+    "set_piece_delivery": {
+      "target_fps": 5,
+      "reason": "density",
+      "default_padding_s": 3
+    }
+  }
+}

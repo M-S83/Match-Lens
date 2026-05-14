@@ -1,0 +1,39 @@
+# Secrets — never commit these
+.env
+.env.*
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Binaries / large files (backstop)
+*.mp4
+*.mov
+*.zip
+*.tar.gz
+
+# Match output directories
+matches/
+output/
+*_output/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Parent skill manifest — belongs in skill workflow, not this repo
+../SKILL.md
+
+# Skill manifest copy — lives in skill workflow, not this repo
+SKILL.md
