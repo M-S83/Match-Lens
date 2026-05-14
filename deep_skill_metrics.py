@@ -39,6 +39,7 @@ import sys
 import re
 from datetime import datetime
 from collections import Counter
+from pipeline_accessors import get_marking
 
 
 EVIDENCE_TIER_CAP = {
@@ -1445,7 +1446,7 @@ def calc_set_piece_delivery_profile(summary):
     by_zone     = Counter(sp.get("zone", sp.get("type", "unknown")) for sp in sps)
     by_delivery = Counter(sp.get("delivery", "unknown") for sp in sps)
     by_outcome  = Counter(sp.get("outcome", "unknown") for sp in sps)
-    by_marking  = Counter(sp.get("marking_system", "unknown") for sp in sps)
+    by_marking  = Counter(get_marking(sp) or "unknown" for sp in sps)
     bodies      = [sp.get("bodies_in_box") for sp in sps if sp.get("bodies_in_box")]
     zone_detail = {}
     for sp in sps:

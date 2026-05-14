@@ -24,6 +24,7 @@ import os
 import sys
 import glob
 from datetime import datetime
+from pipeline_accessors import get_marking
 
 
 def _normalise_team_ref(value: str, mc: dict) -> str:
@@ -179,7 +180,7 @@ def validate_set_piece(sp: dict, window_id) -> tuple:
         "taker_position":     sp.get("taker_position"),
         "delivery_zone":      sp.get("delivery_zone"),
         "bodies_in_box":      sp.get("bodies_in_box"),
-        "marking":            sp.get("marking") or sp.get("marking_system"),
+        "marking_system":     get_marking(sp),
         "rest_defence":       sp.get("rest_defence") or sp.get("rest_defence_count"),
         "outcome":            sp.get("outcome"),
         "delivery_observed":  sp.get("delivery_observed", True),

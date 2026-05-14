@@ -55,3 +55,23 @@ def get_source_limitations_note(profile: dict) -> str:
             or profile.get("source_limitations")
             or profile.get("limitations_note")
             or "")
+
+
+def get_marking(record: dict):
+    """Return the set piece marking value from a set piece record.
+
+    Canonical key is ``marking_system`` — written by both
+    ``setpiece_writeback.apply_burst_to_record`` (via BURST_CONFIRMS) and,
+    after F4, by ``accumulator.validate_set_piece``.
+
+    ``marking`` is the legacy alias written by older accumulator versions
+    and by some 1fps structural agents. Tolerated as a fallback so
+    historical running_summary.json files still read correctly.
+
+    Returns None if neither key is present. Callers that need a categorical
+    default should do ``get_marking(sp) or "unknown"`` — this keeps the
+    distinction between "field absent" and "field present, value empty".
+
+    See AUDIT.md F4.
+    """
+    return record.get("marking_system") or record.get("marking") or None
