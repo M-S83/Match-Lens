@@ -55,6 +55,7 @@ SKILL_MD = os.path.join(os.path.dirname(SCRIPTS_DIR), "SKILL.md")
 # ── Module imports ─────────────────────────────────────────────────────────────
 
 from job_logger            import JobLogger
+from pipeline_accessors import get_source_limitations_note
 from source_profiler       import sample_frames, build_source_profile, CLASSIFICATION_PROMPT
 from escalation_router     import build_escalation_queue
 from deep_skill_metrics    import build_deep_skill_metrics
@@ -261,7 +262,7 @@ def _build_source_injection(match_dir: str) -> str:
         f"Downgraded families (produce findings but add limitations_note):\n"
         f"  {', '.join(downgraded) if downgraded else 'none'}\n"
         f"Allowed families: {', '.join(allowed[:8])}{'...' if len(allowed) > 8 else ''}\n"
-        f"Source limitation: {sp.get('source_limitations_note', '')}"
+        f"Source limitation: {get_source_limitations_note(sp)}"
     )
 
 

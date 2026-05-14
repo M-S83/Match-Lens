@@ -33,3 +33,25 @@ def get_window_id(w: dict) -> str:
     Returns "" if neither key is present (caller must handle).
     """
     return w.get("agent_id") or w.get("window_id") or ""
+
+
+def get_source_limitations_note(profile: dict) -> str:
+    """Return the source limitations note from a source_profile dict.
+
+    `source_profiler.py` writes this as ``source_limitations_note`` —
+    a one-sentence description of the main limitation of the footage type.
+
+    Three legacy aliases are tolerated for hand-edited or older profile
+    files (``notes``, ``source_limitations``, ``limitations_note``);
+    no live writer in the current pipeline produces them. Two scripts
+    (generate_flagged_moments, generate_pass_network) historically read
+    only the legacy aliases, so their reports shipped without the source
+    caveat — see AUDIT.md F3.
+
+    Returns "" if no limitation key is present.
+    """
+    return (profile.get("source_limitations_note")
+            or profile.get("notes")
+            or profile.get("source_limitations")
+            or profile.get("limitations_note")
+            or "")

@@ -13,6 +13,7 @@ Usage:
 import json
 import os
 import sys
+from pipeline_accessors import get_source_limitations_note
 
 
 def build_readiness_check(match_dir: str) -> bool:
@@ -123,8 +124,7 @@ def build_readiness_check(match_dir: str) -> bool:
     # not "source_limitations_note". Prefer either-key so broadcast runs no longer
     # write an empty source-limitation string into report_readiness.json.
     sp = source_prof or {}
-    source_limitations       = (sp.get("source_limitations_note")
-                                or sp.get("notes", ""))
+    source_limitations       = get_source_limitations_note(sp)
     downgraded_families      = [
         f for f, s in (result_gates or {}).get("gates", {}).items()
         if s == "downgraded"
@@ -212,8 +212,7 @@ def build_readiness_check(match_dir: str) -> bool:
         "split_aware":               split_aware,
         "visibility_scores":         (source_prof or {}).get("visibility_scores", {}),
         # Fix 38: see line ~122 for rationale.
-        "source_limitations_note":   ((source_prof or {}).get("source_limitations_note")
-                                      or (source_prof or {}).get("notes", "")),
+        "source_limitations_note":   get_source_limitations_note(source_prof or {}),
         "visibility_based_limitations": source_limitations,
         "suppressed_families":       suppressed_families,
         "downgraded_families":       downgraded_families,

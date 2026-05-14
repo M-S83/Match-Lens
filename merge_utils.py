@@ -27,6 +27,7 @@ import re as _re
 import sys
 import glob
 from pipeline_paths import find_agent_output as _find_agent_file
+from pipeline_accessors import get_source_limitations_note
 from datetime import datetime
 
 
@@ -146,12 +147,12 @@ def merge_single_agent(a_path: str, out_path: str,
         # Fix 39 (same root cause as Fix 38): broadcast source_profile.json
         # stores the limitation under "notes". Either-key fallback so merged
         # findings carry the correct source-note stamp on broadcast runs.
-        source_note = (profile.get("source_limitations_note")
-                       or profile.get("notes", ""))
+        source_note = get_source_limitations_note(profile)
         a["findings"] = stamp_gates_on_findings(
             a.get("findings", []), gates, source_note
         )
         a["source_gates_applied"] = True
+
 
     a["agent_id"]     = agent_id          # ensure accumulator window_id resolves
     a["merge_type"]   = "single_agent"
@@ -297,8 +298,7 @@ def merge_dual_agents(a_path: str, b_path: str, out_path: str,
         # Fix 39 (same root cause as Fix 38): broadcast source_profile.json
         # stores the limitation under "notes". Either-key fallback so merged
         # findings carry the correct source-note stamp on broadcast runs.
-        source_note = (profile.get("source_limitations_note")
-                       or profile.get("notes", ""))
+        source_note = get_source_limitations_note(profile)
         merged_findings = stamp_gates_on_findings(merged_findings, gates, source_note)
 
     # -- Merge confirmation queue items (union) --------------------------------

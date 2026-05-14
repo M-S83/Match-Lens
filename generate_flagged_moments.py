@@ -22,6 +22,7 @@ SCRIPTS_DIR = r"C:\Users\dbmux\.claude\skills\match-analysis\scripts"
 EXEMPLAR    = r"C:\Users\dbmux\Desktop\Match Lens Jobs\2026-04-11_gorleston_vs_tilbury\flagged_moments.md"
 
 sys.path.insert(0, SCRIPTS_DIR)
+from pipeline_accessors import get_source_limitations_note
 from synthesis_agent import (
     _call_synthesis,
     build_input_bundle,
@@ -139,7 +140,7 @@ def generate(match_dir: str) -> None:
         with open(sp_path, encoding="utf-8") as f:
             sp = json.load(f)
         source_type = sp.get("source_type", source_type)
-        source_note = sp.get("source_limitations") or sp.get("limitations_note") or ""
+        source_note = get_source_limitations_note(sp)
 
     with open(EXEMPLAR, encoding="utf-8") as f:
         exemplar = f.read()
