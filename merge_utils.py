@@ -27,7 +27,11 @@ import re as _re
 import sys
 import glob
 from pipeline_paths import find_agent_output as _find_agent_file
-from pipeline_accessors import get_source_limitations_note
+from pipeline_accessors import (
+    get_source_limitations_note,
+    get_formation_home,
+    get_formation_away,
+)
 from datetime import datetime
 
 
@@ -192,23 +196,53 @@ def merge_dual_agents(a_path: str, b_path: str, out_path: str,
     line_status = "agreed" if dl_a.get("avg_pct") == dl_b.get("avg_pct") else "averaged"
 
     # -- Merge formation -------------------------------------------------------
+    # Fix 32a schema: formation is a nested dict with `home` and `away`
+    # strings. F5: merge each side separately so agent B's reading isn't
+    # silently lost via a single-field merge on the legacy schema.
     fm_a = a.get("formation", {})
     fm_b = b.get("formation", {})
-    fm_a_shape = fm_a.get("shape_in_possession")
-    fm_b_shape = fm_b.get("shape_in_possession")
-    formation_merged = merge_categorical(fm_a_shape, fm_b_shape)
-    if fm_a_shape != fm_b_shape:
+
+    fm_a_home = get_formation_home(a)
+    fm_b_home = get_formation_home(b)
+    fm_a_away = get_formation_away(a)
+    fm_b_away = get_formation_away(b)
+
+    home_merged = merge_categorical(fm_a_home, fm_b_home)
+    away_merged = merge_categorical(fm_a_away, fm_b_away)
+
+    if fm_a_home != fm_b_home:
         review_required.append(
-            f"formation: A={fm_a_shape}, B={fm_b_shape} -> used {formation_merged}"
+            f"formation home: A={fm_a_home}, B={fm_b_home} -> used {home_merged}"
         )
-    form_status  = "agreed" if fm_a_shape == fm_b_shape else "resolved"
+    if fm_a_away != fm_b_away:
+        review_required.append(
+            f"formation away: A={fm_a_away}, B={fm_b_away} -> used {away_merged}"
+        )
+
+    home_status = "agreed" if fm_a_home == fm_b_home else "resolved"
+    away_status = "agreed" if fm_a_away == fm_b_away else "resolved"
+    form_status = "agreed" if (home_status == "agreed" and away_status == "agreed") else "resolved"
+
     shape_dispute = None
-    if fm_a_shape != fm_b_shape and fm_a_shape and fm_b_shape:
+    disputes = []
+    if fm_a_home != fm_b_home and fm_a_home and fm_b_home:
+        disputes.append({
+            "side": "home",
+            "agent_a": fm_a_home,
+            "agent_b": fm_b_home,
+            "resolved_to": home_merged,
+        })
+    if fm_a_away != fm_b_away and fm_a_away and fm_b_away:
+        disputes.append({
+            "side": "away",
+            "agent_a": fm_a_away,
+            "agent_b": fm_b_away,
+            "resolved_to": away_merged,
+        })
+    if disputes:
         shape_dispute = {
-            "type":    "formation_disagreement",
-            "agent_a": fm_a_shape,
-            "agent_b": fm_b_shape,
-            "resolved_to": formation_merged,
+            "type": "formation_disagreement",
+            "disputes": disputes,
             "note": "Disagreements on formation often indicate tactical transitions, "
                     "formation changes, or difficult-to-read framing. "
                     "Review the window frames manually if formation is key to the analysis.",
@@ -335,7 +369,11 @@ def merge_dual_agents(a_path: str, b_path: str, out_path: str,
         },
         "formation": {
             **fm_a,
-            "shape_in_possession": formation_merged,
+            "home":                home_merged,
+            "away":                away_merged,
+            # Legacy key preserved for back-compat with old readers; reflects
+            # the home-side merge (closest semantic match to "in-possession").
+            "shape_in_possession": home_merged,
             "merge_note":          form_status,
         },
         "pressing": {

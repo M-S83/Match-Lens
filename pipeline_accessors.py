@@ -75,3 +75,32 @@ def get_marking(record: dict):
     See AUDIT.md F4.
     """
     return record.get("marking_system") or record.get("marking") or None
+
+
+def get_formation_home(record: dict):
+    """Return the home team's formation string from a structural agent dict.
+
+    Canonical: ``formation.home`` (Fix 32a schema, written by current
+    structural agents). Legacy fallback: ``formation.shape_in_possession``
+    — pre-Fix-32a Veo runs wrote a single shape string here, usually
+    describing the focus/home team's in-possession shape. This fallback
+    is approximate on legacy single-side data.
+
+    Returns None if neither key is present.
+    """
+    f = record.get("formation") or {}
+    return f.get("home") or f.get("shape_in_possession") or None
+
+
+def get_formation_away(record: dict):
+    """Return the away team's formation string from a structural agent dict.
+
+    Canonical: ``formation.away``. Legacy fallback:
+    ``formation.shape_out_of_possession`` — pre-Fix-32a Veo runs sometimes
+    wrote the opposition shape here. The mapping IP→home / OOP→away is
+    approximate; legacy files often won't have OOP populated at all.
+
+    Returns None if neither key is present.
+    """
+    f = record.get("formation") or {}
+    return f.get("away") or f.get("shape_out_of_possession") or None

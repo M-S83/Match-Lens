@@ -15,7 +15,11 @@ Progress:
 import glob, json, os, sys, time, argparse
 from pathlib import Path
 from dotenv import load_dotenv
-from pipeline_accessors import get_window_id
+from pipeline_accessors import (
+    get_window_id,
+    get_formation_home,
+    get_formation_away,
+)
 from pipeline_paths import find_agent_output, find_merged_window
 
 # Fix 42: bump on every fix. Surfaced into the report manifest (Section 5).
@@ -1459,7 +1463,8 @@ def run_pipeline(match_dir: str, quality: str = "standard",
             if a_file:
                 with open(a_file, encoding="utf-8") as f:
                     a = json.load(f)
-                struct_ctx = (f"Formation: {a.get('formation',{}).get('shape_in_possession')}, "
+                struct_ctx = (f"Formation home: {get_formation_home(a)}, "
+                              f"Formation away: {get_formation_away(a)}, "
                               f"Line: {a.get('defensive_line',{}).get('avg_pct')}%")
 
             # Match events to this window using video seconds (not match minutes)
