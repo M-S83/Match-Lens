@@ -26,6 +26,7 @@ import os
 import sys
 
 from PIL import Image
+from pipeline_schemas import stamp_schema_version
 
 # Load API key from .env alongside this script.
 _env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -505,7 +506,7 @@ def detect_boundaries(match_dir: str, override: bool = False) -> dict:
         }
         out_path = os.path.join(match_dir, "match_boundaries.json")
         with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2)
+            json.dump(stamp_schema_version(result, "match_boundaries"), f, indent=2)
         print(f"  KO 1H:      {ko_1h // 60}m{ko_1h % 60:02d}s")
         print(f"  HT whistle: {ht // 60}m{ht % 60:02d}s")
         print(f"  KO 2H:      {ko_2h // 60}m{ko_2h % 60:02d}s")
@@ -622,7 +623,7 @@ def detect_boundaries(match_dir: str, override: bool = False) -> dict:
 
     out_path = os.path.join(match_dir, "match_boundaries.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+        json.dump(stamp_schema_version(result, "match_boundaries"), f, indent=2)
 
     print(f"\n{'─'*55}")
     print(f"  KO 1H:      {ko_1h // 60}m{ko_1h % 60:02d}s  (conf {confirmed['ko_1h']['confidence']:.2f})")

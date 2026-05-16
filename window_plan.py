@@ -18,6 +18,7 @@ import os
 import sys
 from datetime import datetime
 from pipeline_accessors import get_match_id
+from pipeline_schemas import stamp_schema_version
 
 WINDOW_SECONDS = 300    # 5-minute windows
 SNAP_THRESHOLD = 15     # snap window edge to container boundary if within 15s
@@ -298,7 +299,7 @@ def build_window_plan(match_dir: str,
     # -- Write and print -------------------------------------------------------
     out_path = os.path.join(match_dir, "window_plan.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(plan, f, indent=2)
+        json.dump(stamp_schema_version(plan, "window_plan"), f, indent=2)
 
     print(f"\n{'-'*55}")
     print(f"  Window plan written: {len(all_windows)} windows")

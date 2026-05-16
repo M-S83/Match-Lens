@@ -23,6 +23,7 @@ import sys
 import glob
 from datetime import datetime
 from pipeline_paths import find_all_merged_windows
+from pipeline_schemas import stamp_schema_version
 
 
 STANDARD_CAP_HIGH   = 10
@@ -295,7 +296,7 @@ def build_escalation_queue(match_dir: str) -> dict:
 
     out_path = os.path.join(match_dir, "confirmation_queue.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(out, f, indent=2)
+        json.dump(stamp_schema_version(out, "confirmation_queue"), f, indent=2)
 
     print(f"\n  Escalation queue built:")
     print(f"    Goals:           {goals_in_q}")

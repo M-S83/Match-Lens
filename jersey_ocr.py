@@ -20,6 +20,7 @@ Source compatibility:
 import argparse, json, os, sys
 from pathlib import Path
 from collections import defaultdict
+from pipeline_schemas import stamp_schema_version
 
 
 def _should_run_ocr(source_profile_path: str) -> bool:
@@ -237,7 +238,7 @@ def main():
 
     out_path = os.path.join(args.match_dir, 'jersey_number_map.json')
     with open(out_path, 'w', encoding='utf-8') as f:
-        json.dump(output, f, indent=2)
+        json.dump(stamp_schema_version(output, "jersey_number_map"), f, indent=2)
 
     print(f"\n  [OCR] jersey_number_map.json written")
     print(f"  Players sighted: {len(summary)}")

@@ -17,6 +17,7 @@ Quality levels:
 
 import json, os, sys, argparse
 from pipeline_accessors import get_window_start_seconds, get_window_end_seconds, get_match_id
+from pipeline_schemas import stamp_schema_version
 
 # ── Token costs (Anthropic API, claude-sonnet-4-5, April 2026) ──────────────
 TOKENS_PER_FRAME = 1568      # standard resolution image
@@ -230,5 +231,5 @@ if __name__ == "__main__":
     # Write estimate to file
     out_path = os.path.join(args.match_dir, "cost_estimate.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({"match": match_data, "estimates": estimates}, f, indent=2)
+        json.dump(stamp_schema_version({"match": match_data, "estimates": estimates}, "cost_estimate"), f, indent=2)
     print(f"  Estimate written to: {out_path}\n")

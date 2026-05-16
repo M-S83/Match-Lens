@@ -14,6 +14,7 @@ import json
 import os
 import time
 from datetime import datetime
+from pipeline_schemas import stamp_schema_version
 
 
 class JobLogger:
@@ -163,7 +164,7 @@ class JobLogger:
     def _save(self):
         os.makedirs(self.match_dir, exist_ok=True)
         with open(self.log_path, "w", encoding="utf-8") as f:
-            json.dump(self.log, f, indent=2)
+            json.dump(stamp_schema_version(self.log, "job_log"), f, indent=2)
 
 
 def summarise_jobs(jobs_root: str):

@@ -32,6 +32,7 @@ from pipeline_accessors import (
     get_formation_home,
     get_formation_away,
 )
+from pipeline_schemas import stamp_schema_version
 from datetime import datetime
 
 
@@ -163,7 +164,7 @@ def merge_single_agent(a_path: str, out_path: str,
     a["merged_at"]    = datetime.now().isoformat()
 
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(a, f, indent=2)
+        json.dump(stamp_schema_version(a, "agent_merged"), f, indent=2)
 
     print(f"  [{agent_id}] Single -> {os.path.basename(out_path)}"
           f" | patches: {len(patches)}")
@@ -415,7 +416,7 @@ def merge_dual_agents(a_path: str, b_path: str, out_path: str,
     }
 
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(merged, f, indent=2)
+        json.dump(stamp_schema_version(merged, "agent_merged"), f, indent=2)
 
     issues = len(review_required)
     print(f"  [{agent_id}] Dual   -> {os.path.basename(out_path)}"

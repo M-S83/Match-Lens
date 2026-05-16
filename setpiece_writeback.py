@@ -21,6 +21,7 @@ import json
 import os
 from datetime import datetime
 from pipeline_paths import find_merged_window
+from pipeline_schemas import stamp_schema_version
 
 # Fields the burst confirms (1fps read them; 5fps re-reads for accuracy)
 BURST_CONFIRMS = {"bodies_in_box", "delivery_zone", "marking_system", "outcome"}
@@ -141,7 +142,7 @@ def writeback_burst(burst_path: str, merged_window_path: str, summary_path: str,
     changed, corrections = apply_burst_to_record(record, burst)
 
     with open(merged_window_path, "w", encoding="utf-8") as f:
-        json.dump(merged, f, indent=2)
+        json.dump(stamp_schema_version(merged, "agent_merged"), f, indent=2)
 
     # --- Mirror patch into running_summary.json ---
     if os.path.exists(summary_path):
@@ -154,7 +155,7 @@ def writeback_burst(burst_path: str, merged_window_path: str, summary_path: str,
         if summary_record is not None:
             apply_burst_to_record(summary_record, burst)
             with open(summary_path, "w", encoding="utf-8") as f:
-                json.dump(summary, f, indent=2)
+                json.dump(stamp_schema_version(summary, "running_summary"), f, indent=2)
 
     # --- Mark confirmation_queue entry resolved ---
     _queue_path = queue_path or os.path.join(
@@ -174,7 +175,7 @@ def writeback_burst(burst_path: str, merged_window_path: str, summary_path: str,
                 break
 
         with open(_queue_path, "w", encoding="utf-8") as f:
-            json.dump(queue, f, indent=2)
+            json.dump(stamp_schema_version(queue, "confirmation_queue"), f, indent=2)
 
     print(f"  [WB] {anchor_ts}/{team} -- "
           f"{len(changed)} fields updated, "

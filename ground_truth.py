@@ -20,6 +20,7 @@ import os
 import sys
 from datetime import datetime
 from pipeline_accessors import get_window_start_seconds, get_window_end_seconds
+from pipeline_schemas import stamp_schema_version
 
 
 # -- Timing tolerance ----------------------------------------------------------
@@ -300,7 +301,7 @@ def build_ground_truth_check(match_dir: str) -> dict:
     # -- Write output ----------------------------------------------------------
     out_path = os.path.join(match_dir, "ground_truth_check.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2)
+        json.dump(stamp_schema_version(output, "ground_truth_check"), f, indent=2)
 
     # -- Print summary ---------------------------------------------------------
     print(f"\n{'-'*55}")

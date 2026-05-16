@@ -17,6 +17,7 @@ Usage:
 
 import json
 import os
+from pipeline_schemas import stamp_schema_version
 
 # -- Level definitions --------------------------------------------------------
 
@@ -339,7 +340,7 @@ if __name__ == "__main__":
                 mc = json.load(f)
             mc["report_level"] = level
             with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(mc, f, indent=2)
+                json.dump(stamp_schema_version(mc, "match_config"), f, indent=2)
             print(f"  Set report_level = {level} in match_config.json")
     config = build_report_config(match_dir)
     print(json.dumps(config, indent=2, default=str))

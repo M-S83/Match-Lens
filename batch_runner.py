@@ -22,6 +22,7 @@ Usage:
 import json, os, time, anthropic
 from datetime import datetime
 from pipeline_state import mark_window, store_batch_id
+from pipeline_schemas import stamp_schema_version
 
 
 MODEL       = "claude-sonnet-4-20250514"
@@ -340,7 +341,10 @@ def collect_results(batch_id: str, match_dir: str,
             # rather than crash the whole collection loop.
             try:
                 with open(out_path, "w", encoding="utf-8") as f:
-                    json.dump(output, f, indent=2)
+                    # suffix is the canonical agent file type from suffix_map
+                    # (structural / player / event / setpiece / recovery);
+                    # registry key is f"agent_{suffix}".
+                    json.dump(stamp_schema_version(output, f"agent_{suffix}"), f, indent=2)
             except OSError as _ioe:
                 print(f"  [ERROR] Failed to write {out_path}: {_ioe}")
                 mark_window(match_dir, state, window_id, step, "failed",

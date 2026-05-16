@@ -19,6 +19,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from pipeline_schemas import stamp_schema_version
 
 
 def analyse_container(video_path: str) -> dict:
@@ -333,7 +334,7 @@ def run_step_1a(match_dir: str, video_path: str) -> dict:
 
     out_path = os.path.join(match_dir, "container_profile.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(profile, f, indent=2)
+        json.dump(stamp_schema_version(profile, "container_profile"), f, indent=2)
 
     # Print summary
     print(f"  Format:      {profile['format_name']}")

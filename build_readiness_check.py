@@ -14,6 +14,7 @@ import json
 import os
 import sys
 from pipeline_accessors import get_source_limitations_note
+from pipeline_schemas import stamp_schema_version
 
 
 def build_readiness_check(match_dir: str) -> bool:
@@ -180,7 +181,7 @@ def build_readiness_check(match_dir: str) -> bool:
 
     out_path = os.path.join(match_dir, "report_readiness.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(readiness, f, indent=2)
+        json.dump(stamp_schema_version(readiness, "report_readiness"), f, indent=2)
 
     # -- Terminal output -------------------------------------------------------
     status = "[OK] READY" if report_ready else "[X]  NOT READY"
@@ -241,7 +242,7 @@ def build_readiness_check(match_dir: str) -> bool:
     }
     rel_path = os.path.join(match_dir, "confidence_reliability_report.json")
     with open(rel_path, "w", encoding="utf-8") as f:
-        json.dump(reliability, f, indent=2)
+        json.dump(stamp_schema_version(reliability, "confidence_reliability_report"), f, indent=2)
     print(f"  confidence_reliability_report.json written")
 
     if deep_metrics:

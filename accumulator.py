@@ -25,6 +25,7 @@ import sys
 import glob
 from datetime import datetime
 from pipeline_accessors import get_marking, get_match_id
+from pipeline_schemas import stamp_schema_version
 
 
 def _normalise_team_ref(value: str, mc: dict) -> str:
@@ -115,7 +116,7 @@ def accumulate_pass_sequences(merged_path: str,
     ps["last_updated"]    = datetime.now().isoformat()
 
     with open(pass_sequences_path, "w", encoding="utf-8") as f:
-        json.dump(ps, f, indent=2)
+        json.dump(stamp_schema_version(ps, "pass_sequences"), f, indent=2)
 
     return len(new_sequences)
 
@@ -256,7 +257,12 @@ def append_to_confirmation_queue(entries: list, queue_path: str) -> int:
 
     queue["total"] = len(queue.get("items", []))
     with open(queue_path, "w", encoding="utf-8") as f:
-        json.dump(queue, f, indent=2)
+        # This is the minimal-shape initialisation write; the full
+        # confirmation_queue schema is rebuilt by escalation_router.py
+        # later in the pipeline. Both writers stamp the same schema
+        # version; consumers should not read confirmation_queue.json
+        # between these two writes.
+        json.dump(stamp_schema_version(queue, "confirmation_queue"), f, indent=2)
 
     return appended
 
@@ -533,7 +539,7 @@ def update_running_summary(merged_path: str,
     summary["last_updated"] = datetime.now().isoformat()
 
     with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
+        json.dump(stamp_schema_version(summary, "running_summary"), f, indent=2)
 
     return summary
 
@@ -1274,7 +1280,7 @@ def accumulate_all_windows(match_dir: str) -> dict:
     # Always reset summary and pass_sequences before accumulating all windows
     # (function processes ALL merged files each call, so must build fresh)
     with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump({
+        json.dump(stamp_schema_version({
             "match":                  config.get("match", "") if os.path.exists(config_path) else "",
             "home_team":              home_team,
             "away_team":              away_team,
@@ -1296,15 +1302,15 @@ def accumulate_all_windows(match_dir: str) -> dict:
             "data_gap_windows":       [],
             "findings":               [],
             "confirmation_queue":     [],
-        }, f, indent=2)
+        }, "running_summary"), f, indent=2)
     with open(pass_sequences_path, "w", encoding="utf-8") as f:
-        json.dump({
+        json.dump(stamp_schema_version({
             "match":           config.get("match", "") if os.path.exists(config_path) else "",
             "home_team":       home_team,
             "away_team":       away_team,
             "total_sequences": 0,
             "sequences":       [],
-        }, f, indent=2)
+        }, "pass_sequences"), f, indent=2)
 
     print(f"\n{'-'*55}")
     print(f"  Accumulating {len(merged_files)} merged windows")
@@ -1382,7 +1388,7 @@ def accumulate_all_windows(match_dir: str) -> dict:
         summary_for_update["runner_pattern_summary"]  = runner_summary
         summary_for_update["player_tendencies"]       = player_tendencies
         with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary_for_update, f, indent=2)
+            json.dump(stamp_schema_version(summary_for_update, "running_summary"), f, indent=2)
         print(f"  Canonical formations: home={home_canonical}, away={away_canonical}")
         if far_side_summary.get("available"):
             print(f"  Far-side shape: {far_side_summary['windows_with_data']} windows with data")
@@ -1667,7 +1673,7 @@ def build_shots_log(match_dir: str) -> dict:
 
     out_path = os.path.join(match_dir, "shots_log.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(shots_log, f, indent=2, ensure_ascii=False)
+        json.dump(stamp_schema_version(shots_log, "shots_log"), f, indent=2, ensure_ascii=False)
 
     confirmed  = sum(1 for s in shots if s["evidence_grade"] == "A")
     facts_only = sum(1 for s in shots if s["evidence_grade"] == "C")
@@ -1698,6 +1704,9 @@ def aggregate_shots(matches_root: str, output_path: str = None) -> list:
 
     if output_path:
         with open(output_path, "w", encoding="utf-8") as f:
+            # F12 exclusion: writes a top-level JSON list (not a dict), so
+            # stamp_schema_version cannot apply without changing the output
+            # contract. See pipeline_schemas.py "Exclusions" section.
             json.dump(all_shots, f, indent=2, ensure_ascii=False)
         print(f"Aggregated {len(all_shots)} goals from "
               f"{matches_root} -> {output_path}")

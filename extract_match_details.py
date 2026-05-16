@@ -21,6 +21,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from pipeline_schemas import stamp_schema_version
 
 # Load API key from .env in the same directory as this script.
 # Use dotenv_values + explicit os.environ assignment so that an already-set
@@ -193,7 +194,7 @@ def extract_match_details(match_dir: str, screenshot_path: str) -> dict:
     }
     raw_path = os.path.join(match_dir, "teamsheet_image_raw.json")
     with open(raw_path, "w", encoding="utf-8") as f:
-        json.dump(raw_record, f, indent=2)
+        json.dump(stamp_schema_version(raw_record, "teamsheet_image_raw"), f, indent=2)
     print(f"  Raw response saved → teamsheet_image_raw.json")
     print(f"  Tokens: {response.usage.input_tokens} in / {response.usage.output_tokens} out")
 
@@ -229,7 +230,7 @@ def extract_match_details(match_dir: str, screenshot_path: str) -> dict:
     # Write draft config
     draft_path = os.path.join(match_dir, "match_config_draft.json")
     with open(draft_path, "w", encoding="utf-8") as f:
-        json.dump(extracted, f, indent=2)
+        json.dump(stamp_schema_version(extracted, "match_config_draft"), f, indent=2)
 
     print(f"  Draft config saved → match_config_draft.json")
     print(f"{'─'*55}\n")

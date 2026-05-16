@@ -35,6 +35,7 @@ State file structure:
 
 import json, os
 from datetime import datetime
+from pipeline_schemas import stamp_schema_version
 
 STATE_FILE = "pipeline_state.json"
 
@@ -177,7 +178,7 @@ def store_batch_id(match_dir: str, state: dict, key: str, batch_id: str) -> dict
 def _save(match_dir: str, state: dict):
     path = os.path.join(match_dir, STATE_FILE)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+        json.dump(stamp_schema_version(state, "pipeline_state"), f, indent=2)
 
 
 if __name__ == "__main__":

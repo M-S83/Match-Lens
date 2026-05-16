@@ -16,6 +16,7 @@ Usage:
 import os, json
 from pathlib import Path
 from typing import Optional
+from pipeline_schemas import stamp_schema_version
 
 try:
     from PIL import Image, ImageStat
@@ -396,13 +397,13 @@ def save_metadata(match_dir: str, window_id: str, result: dict):
     out_dir.mkdir(exist_ok=True)
     out_path = out_dir / f"{window_id}_metadata.json"
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({
+        json.dump(stamp_schema_version({
             "window_id":      window_id,
             "stats":          result["stats"],
             "flagged_events": result["flagged_events"],
             "frame_count":    len(result["filtered_frames"]),
             "metadata":       result["metadata"],
-        }, f, indent=2)
+        }, "frame_metadata"), f, indent=2)
     return str(out_path)
 
 

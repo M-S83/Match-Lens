@@ -19,6 +19,7 @@ import os
 import sys
 import cv2
 from datetime import datetime
+from pipeline_schemas import stamp_schema_version
 
 
 MIN_CONFIDENCE          = 0.6   # below this -> default to unknown
@@ -258,7 +259,7 @@ def build_source_profile(match_dir: str, classification_result: dict,
 
     profile_path = os.path.join(match_dir, "source_profile.json")
     with open(profile_path, "w", encoding="utf-8") as f:
-        json.dump(profile, f, indent=2)
+        json.dump(stamp_schema_version(profile, "source_profile"), f, indent=2)
 
     # Write result_family_gates.json
     gates_doc = {
@@ -271,7 +272,7 @@ def build_source_profile(match_dir: str, classification_result: dict,
 
     gates_path = os.path.join(match_dir, "result_family_gates.json")
     with open(gates_path, "w", encoding="utf-8") as f:
-        json.dump(gates_doc, f, indent=2)
+        json.dump(stamp_schema_version(gates_doc, "result_family_gates"), f, indent=2)
 
     suppressed = [f for f, s in gates.items() if s == "suppressed"]
     downgraded = [f for f, s in gates.items() if s == "downgraded"]

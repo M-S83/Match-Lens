@@ -40,6 +40,7 @@ import re
 from datetime import datetime
 from collections import Counter
 from pipeline_accessors import get_marking
+from pipeline_schemas import stamp_schema_version
 
 
 EVIDENCE_TIER_CAP = {
@@ -2128,7 +2129,7 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
 
     out_path = os.path.join(match_dir, "deep_skill_metrics.json")
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2)
+        json.dump(stamp_schema_version(output, "deep_skill_metrics"), f, indent=2)
 
     print(f"\n{chr(45)*55}")
     print(f"  Deep skill metrics written")
