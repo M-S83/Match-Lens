@@ -1867,7 +1867,7 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
     # verbatim. The calculation_basis is read by synthesis as context;
     # "per window" leaks WINDOW LANGUAGE RULE violations into reports.
     metrics.append(make_metric("rest_defence_security_score", "match", ["rest_defence"],
-        {"avg_backward_shifts_per_phase": backward_per_win,
+        {"avg_backward_shifts_per_window": backward_per_win,
          "category": rest_cat,
          "summary": f"{backward_per_win} avg backward line shifts ({rest_cat})"},
         "profile", t, 0.75, w,
