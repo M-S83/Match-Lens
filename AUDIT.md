@@ -172,6 +172,15 @@ Note: `pipeline_runner.py` (v1) also contained this pattern but was removed from
 
 ### F8 — `confirmation_queue` exists in two places with divergent schemas
 
+**Status:** RESOLVED-AS-DOCUMENTED — the divergence is real in the code
+but does not fire under the project's one-run-per-match workflow. No
+consumer reads embedded confirmation queues after `setpiece_writeback.py`
+runs. The standalone `confirmation_queue.json` is canonical; embedded
+queues are write-once consolidation input. Architectural invariant
+recorded in `SKILL.md` § Pipeline Invariants and inline comment in
+`escalation_router.py` at the consolidation read site. Becomes a real
+bug if any re-run path is added — see SKILL.md for the conditions.
+
 **Severity:** MEDIUM — downstream consumers may read stale or incomplete data  
 **Files affected:** `accumulator.py`, `escalation_router.py`, `setpiece_writeback.py`, `deep_skill_metrics.py`, `build_readiness_check.py`
 

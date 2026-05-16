@@ -173,6 +173,22 @@ def build_escalation_queue(match_dir: str) -> dict:
         # "window" is set by dual-merge; single-agent merges use "agent_id"
         window = w.get("window") or w.get("agent_id") or ""
         source = os.path.basename(path)
+        # ARCHITECTURAL INVARIANT (F8):
+        # The standalone confirmation_queue.json is the canonical source of
+        # truth for confirmation state. Embedded confirmation_queue arrays
+        # inside agent_*_merged.json files are write-once data, produced by
+        # accumulator.py and read only here for the consolidation pass below.
+        # No other consumer reads them.
+        #
+        # As a consequence, setpiece_writeback.py marks items as resolved:true
+        # ONLY in the standalone file. The embedded copies retain their
+        # original unresolved state forever. This is intentional, not a bug.
+        #
+        # This invariant depends on the pipeline being run at most once per
+        # match directory. If a re-run path is ever added (recovery workflow,
+        # partial re-processing, repeated confirmation passes), the embedded
+        # queues will be re-consolidated and resolved items will re-appear in
+        # the standalone queue. See SKILL.md "Pipeline Invariants" section.
         for item in w.get("confirmation_queue", []):
             item["window"] = window
             item["source"] = source
