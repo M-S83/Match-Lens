@@ -262,7 +262,7 @@ On the first run this produces a `running_summary.json` where `set_pieces_reject
 ### F12 — No `schema_version` field in any pipeline-written JSON file
 
 **Status:** RESOLVED — schema_version stamped on every live pipeline
-JSON output in commit [SHA-pending]. 32 write sites across 19 scripts
+JSON output in commit 7625e24. 32 write sites across 19 scripts
 route through pipeline_schemas.stamp_schema_version(), which reads from
 a per-file-type version registry (27 entries, all at "1.0"). Two writers
 are explicitly excluded with documented rationale: the JSONL writer in
