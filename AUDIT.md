@@ -164,6 +164,8 @@ This silently embeds the directory name (e.g. `2026-04-11_gorleston_vs_tilbury`)
 
 **Suggested fix:** Add an explicit warning log line when the fallback activates. Consider a separate `match_id` key in `match_config.json` distinct from the display-name `match` field, to prevent the basename fallback from appearing in analytical output.
 
+Note: `pipeline_runner.py` (v1) also contained this pattern but was removed from the codebase. F7 scope is now three scripts: `accumulator.py`, `shots_log_addition.py`, `window_plan.py`.
+
 ---
 
 ### F8 — `confirmation_queue` exists in two places with divergent schemas
@@ -259,6 +261,8 @@ As schemas evolve (as evidenced by findings F4, F5, F9 above, which are all the 
 
 ### F13 — Dead `"queue"` key fallback in `step_3i_escalation` (v1)
 
+**Status:** RESOLVED — v1 removed. See `git show de93081:pipeline_runner.py` for historical reference.
+
 **Severity:** LOW (dead code, no runtime effect)  
 **Files affected:** `pipeline_runner.py`
 
@@ -276,6 +280,8 @@ items = [i for i in cq_doc.get("items", cq_doc.get("queue", []))
 ---
 
 ### F14 — `apply_confirmation_to_summary()` is a second write path to `running_summary.json` in v1
+
+**Status:** RESOLVED — v1 removed. See `git show de93081:pipeline_runner.py` for historical reference.
 
 **Severity:** MEDIUM — v1 and v2 write overlapping fields to the same file via different mechanisms  
 **Files affected:** `pipeline_runner.py`, `accumulator.py`, `setpiece_writeback.py`
@@ -295,6 +301,8 @@ These two mechanisms produce overlapping edits to the same canonical file. If bo
 ---
 
 ### F15 — v1 fallback merge produces Pattern C filenames (source suffix embedded in merged name)
+
+**Status:** RESOLVED — v1 removed. See `git show de93081:pipeline_runner.py` for historical reference.
 
 **Severity:** LOW (only triggers when `window_plan.json` is absent)  
 **Files affected:** `pipeline_runner.py`

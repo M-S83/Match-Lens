@@ -407,5 +407,5 @@ def retry_failed(match_dir: str, state: dict, step: str,
 
 
 if __name__ == "__main__":
-    print("batch_runner.py — import this module to use in pipeline_runner.py")
+    print("batch_runner.py — import this module to use in pipeline_runner_v2.py")
     print("Functions: submit_batch, poll_batch, collect_results, retry_failed, with_retry")

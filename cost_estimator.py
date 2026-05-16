@@ -193,7 +193,7 @@ def print_estimate(match_data: dict, estimates: list, budget: float = None):
     print(f"  Recommendation: {best['label']}")
     print(f"  Frames per window: {best['frames_per_window']}")
     print(f"  Event frames:      {best['event_frames']}")
-    print(f"\n  To run:  python pipeline_runner.py {sys.argv[1] if len(sys.argv)>1 else '[MATCH_DIR]'} "
+    print(f"\n  To run:  python pipeline_runner_v2.py {sys.argv[1] if len(sys.argv)>1 else '[MATCH_DIR]'} "
           f"--quality {best['quality']}")
     print()
 

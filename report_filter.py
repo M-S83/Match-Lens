@@ -298,7 +298,7 @@ SECTION_FILTER_BY_LEVEL = {
 def build_report_prompt(config: dict, report_type: str = "opposition") -> str:
     """
     Return the level-specific injection block for the report prompt.
-    This is prepended to the standard report prompt in pipeline_runner.py.
+    This is prepended to the standard report prompt in pipeline_runner_v2.py.
     """
     level = config.get("level", "standard")
     spec  = LEVEL_SPECS[level]

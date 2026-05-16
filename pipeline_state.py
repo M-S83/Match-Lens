@@ -2,7 +2,7 @@
 pipeline_state.py — checkpoint manager for Match Lens pipeline
 
 Writes pipeline_state.json to the match directory after every step.
-If a run is interrupted, re-running pipeline_runner.py will skip
+If a run is interrupted, re-running pipeline_runner_v2.py will skip
 completed steps and resume from the exact failure point.
 
 State file structure:
