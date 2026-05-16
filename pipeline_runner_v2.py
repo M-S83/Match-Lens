@@ -19,6 +19,8 @@ from pipeline_accessors import (
     get_window_id,
     get_formation_home,
     get_formation_away,
+    get_window_start_seconds,
+    get_window_end_seconds,
 )
 from pipeline_paths import find_agent_output, find_merged_window
 
@@ -165,8 +167,12 @@ def get_window_frames(match_dir: str, window: dict, n: int) -> list:
     In flat layout, filters by window start_s / end_s using filename timestamp.
     """
     window_id  = get_window_id(window)
-    start_s    = window.get("start_s", window.get("start_seconds", 0))
-    end_s      = window.get("end_s",   window.get("end_seconds",   start_s + 300))
+    start_s    = get_window_start_seconds(window)
+    # end_s=0 is treated as missing here; window_plan.py never writes literal
+    # zero, so this only matters for malformed input where the 5-minute default
+    # is the right recovery anyway. Strict-equivalent old code:
+    # w.get("end_s", w.get("end_seconds", start_s + 300))
+    end_s      = get_window_end_seconds(window) or (start_s + 300)
 
     # Try per-window subdirectory first
     subdir = os.path.join(match_dir, "frames", window_id)
@@ -664,7 +670,7 @@ def _match_state_at_window(mc: dict, window: dict) -> dict:
     if ko_2h_s is None:
         ko_2h_s = ko_1h_s + 2700
 
-    win_start_s = window.get("start_s", window.get("start_seconds", 0))
+    win_start_s = get_window_start_seconds(window)
 
     home_score = 0
     away_score = 0
@@ -1468,8 +1474,8 @@ def run_pipeline(match_dir: str, quality: str = "standard",
                               f"Line: {a.get('defensive_line',{}).get('avg_pct')}%")
 
             # Match events to this window using video seconds (not match minutes)
-            win_start_s = win.get("start_s", win.get("start_seconds", 0))
-            win_end_s   = win.get("end_s",   win.get("end_seconds",   0))
+            win_start_s = get_window_start_seconds(win)
+            win_end_s   = get_window_end_seconds(win)
             for ev in events:
                 ev_video_s = _ev_to_video_s(_ev_minute(ev))
                 if ev_video_s is not None and win_start_s <= ev_video_s <= win_end_s:
@@ -2051,8 +2057,8 @@ def _window_has_event(wid: str, events: list, windows: list) -> bool:
     if "event_window" in win:
         return bool(win["event_window"])
     # Fallback: time-range match using correct key names
-    t_start = win.get("start_s", win.get("start_seconds", 0)) / 60
-    t_end   = win.get("end_s",   win.get("end_seconds",   0)) / 60
+    t_start = get_window_start_seconds(win) / 60
+    t_end   = get_window_end_seconds(win) / 60
     return any(t_start <= _ev_minute(ev) <= t_end
                for ev in events
                if isinstance(_ev_minute(ev), (int, float)))
