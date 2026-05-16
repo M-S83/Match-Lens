@@ -538,53 +538,6 @@ def update_running_summary(merged_path: str,
     return summary
 
 
-def apply_confirmation_to_summary(confirmation_result: dict,
-                                  summary_path: str) -> None:
-    """
-    Update running_summary.json with a resolved confirmation item from Step 3i.
-    Called after each higher-fps confirmation is completed.
-
-    confirmation_result should contain:
-        timestamp, event_type, confirmed_outcome, confidence_after_rerun,
-        evidence_tier, recommended_report_wording
-    """
-    if not os.path.exists(summary_path):
-        return
-
-    with open(summary_path, encoding="utf-8") as f:
-        summary = json.load(f)
-
-    ts = confirmation_result.get("timestamp")
-    if not ts:
-        return
-
-    # Update matching key_moment if found
-    for moment in summary.get("key_moments", []):
-        if moment.get("timestamp") == ts:
-            moment["confirmed_outcome"]      = confirmation_result.get("confirmed_outcome")
-            moment["confidence_after_rerun"] = confirmation_result.get("confidence_after_rerun")
-            moment["evidence_tier"]          = confirmation_result.get("evidence_tier")
-            moment["recommended_wording"]    = confirmation_result.get("recommended_report_wording")
-            moment["status"]                 = confirmation_result.get("status", "confirmed")
-            break
-    else:
-        # Add as new confirmed moment
-        summary["key_moments"].append({
-            "timestamp":            ts,
-            "type":                 confirmation_result.get("event_type"),
-            "description":          confirmation_result.get("confirmed_outcome"),
-            "confidence_after_rerun": confirmation_result.get("confidence_after_rerun"),
-            "evidence_tier":        confirmation_result.get("evidence_tier"),
-            "recommended_wording":  confirmation_result.get("recommended_report_wording"),
-            "status":               confirmation_result.get("status", "confirmed"),
-            "from_escalation":      True,
-        })
-
-    summary["last_updated"] = datetime.now().isoformat()
-
-    with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
-
 
 # -- Batch accumulation --------------------------------------------------------
 
