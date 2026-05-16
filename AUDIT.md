@@ -232,6 +232,8 @@ The key name in the metric definition does not match the key name in the compute
 
 ### F11 — `accumulator.py` reset block omits `set_pieces_rejected` key
 
+**Status:** RESOLVED — already fixed in the codebase prior to this audit work; verified during F10 fix. set_pieces_rejected is present in accumulator.py's reset block at the canonical location.
+
 **Severity:** LOW — `setdefault` compensates but creates an asymmetric schema on first vs. subsequent runs  
 **Files affected:** `accumulator.py`
 
