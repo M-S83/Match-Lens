@@ -5,7 +5,7 @@
 
 import json, os, glob
 from pathlib import Path
-from pipeline_accessors import get_window_id
+from pipeline_accessors import get_window_id, get_window_start_seconds, get_window_end_seconds
 
 
 def build_shots_log(match_dir: str) -> dict:
@@ -62,8 +62,8 @@ def build_shots_log(match_dir: str) -> dict:
     def _window_for_minute(minute: int) -> dict:
         video_s = _minute_to_video_s(minute)
         for w in windows:
-            start = w.get("start_s", w.get("start_seconds", 0))
-            end   = w.get("end_s",   w.get("end_seconds",   0))
+            start = get_window_start_seconds(w)
+            end   = get_window_end_seconds(w)
             if start <= video_s <= end:
                 return w
         return {}

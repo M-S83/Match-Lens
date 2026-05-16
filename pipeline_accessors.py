@@ -104,3 +104,33 @@ def get_formation_away(record: dict):
     """
     f = record.get("formation") or {}
     return f.get("away") or f.get("shape_out_of_possession") or None
+
+
+def get_window_start_seconds(w: dict) -> float:
+    """Return the canonical window start time in seconds.
+
+    `window_plan.py` writes this as ``start_s``. The legacy ``start_seconds``
+    alias is tolerated for any historical window_plan.json files written
+    under the old schema; no live writer in the current pipeline produces it.
+
+    Returns 0.0 if neither key is present (caller must handle).
+    """
+    v = w.get("start_s")
+    if v is None:
+        v = w.get("start_seconds", 0.0)
+    return float(v)
+
+
+def get_window_end_seconds(w: dict) -> float:
+    """Return the canonical window end time in seconds.
+
+    `window_plan.py` writes this as ``end_s``. The legacy ``end_seconds``
+    alias is tolerated for any historical window_plan.json files written
+    under the old schema; no live writer in the current pipeline produces it.
+
+    Returns 0.0 if neither key is present (caller must handle).
+    """
+    v = w.get("end_s")
+    if v is None:
+        v = w.get("end_seconds", 0.0)
+    return float(v)

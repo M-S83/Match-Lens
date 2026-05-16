@@ -16,6 +16,7 @@ Quality levels:
 """
 
 import json, os, sys, argparse
+from pipeline_accessors import get_window_start_seconds, get_window_end_seconds
 
 # ── Token costs (Anthropic API, claude-sonnet-4-5, April 2026) ──────────────
 TOKENS_PER_FRAME = 1568      # standard resolution image
@@ -72,8 +73,8 @@ def load_match_data(match_dir: str) -> dict:
     event_windows = 0
     null_windows  = 0
     for w in windows:
-        t_start = w.get("start_s", w.get("start_seconds", 0)) / 60
-        t_end   = w.get("end_s",   w.get("end_seconds", 0)) / 60
+        t_start = get_window_start_seconds(w) / 60
+        t_end   = get_window_end_seconds(w) / 60
         if w.get("event_window") or any(t_start <= m <= t_end for m in event_minutes):
             event_windows += 1
         # null windows: not event_window and boundary_nearby (data gap proxy)

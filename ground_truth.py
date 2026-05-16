@@ -19,6 +19,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from pipeline_accessors import get_window_start_seconds, get_window_end_seconds
 
 
 # -- Timing tolerance ----------------------------------------------------------
@@ -122,7 +123,7 @@ def find_event_in_moments(event: dict, key_moments: list) -> dict | None:
 def event_window_id(event_seconds: float, windows: list) -> str | None:
     """Return the agent_id of the window containing this event."""
     for w in windows:
-        if w["start_s"] <= event_seconds <= w["end_s"]:
+        if get_window_start_seconds(w) <= event_seconds <= get_window_end_seconds(w):
             return w["agent_id"]
     return None
 
