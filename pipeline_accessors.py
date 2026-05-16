@@ -134,3 +134,29 @@ def get_window_end_seconds(w: dict) -> float:
     if v is None:
         v = w.get("end_seconds", 0.0)
     return float(v)
+
+
+def get_match_id(match_dir: str, mc: dict | None = None) -> str:
+    """Return the canonical match identifier.
+
+    Reads ``mc["match"]`` if available, otherwise falls back to
+    ``os.path.basename(match_dir)``. The fallback exists for two
+    legitimate cases:
+
+    1. ``match_config.json`` has been written but its ``match`` key is
+       missing or empty (data problem — caller should log a WARNING).
+    2. ``match_config.json`` does not yet exist on disk because the
+       caller runs early in the pipeline, before extract_match_details.py
+       has produced it (expected — caller should log INFO).
+
+    Callers are responsible for logging if and how the fallback firing
+    should be surfaced; this accessor stays pure (no I/O, no logging,
+    no side effects) per the module's stated principles.
+
+    Returns the basename of match_dir if mc is None or mc["match"] is
+    missing/empty.
+    """
+    import os
+    if mc and mc.get("match"):
+        return mc["match"]
+    return os.path.basename(match_dir)

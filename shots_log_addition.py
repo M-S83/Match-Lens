@@ -3,9 +3,9 @@
 # Called from pipeline_runner_v2.py as step 3f_shots (after 3e merge)
 # No changes to existing functions required.
 
-import json, os, glob
+import json, os, glob, sys
 from pathlib import Path
-from pipeline_accessors import get_window_id, get_window_start_seconds, get_window_end_seconds
+from pipeline_accessors import get_window_id, get_window_start_seconds, get_window_end_seconds, get_match_id
 
 
 def build_shots_log(match_dir: str) -> dict:
@@ -37,7 +37,9 @@ def build_shots_log(match_dir: str) -> dict:
         wp = json.load(f)
 
     windows   = wp.get("windows", [])
-    match_id  = mc.get("match", os.path.basename(match_dir))
+    match_id  = get_match_id(match_dir, mc)
+    if not mc.get("match"):
+        print(f"  [!] WARNING: match_config.json missing 'match' key -- using dirname '{match_id}'", file=sys.stderr)
     home_team = mc.get("home_team", "home")
     away_team = mc.get("away_team", "away")
 

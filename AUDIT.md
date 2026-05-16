@@ -150,8 +150,10 @@ These paths are baked into the top-level module scope, not inside functions, so 
 
 ### F7 — `match_id` fallback to `os.path.basename(match_dir)`
 
+**Status:** RESOLVED — all 5 fallback sites routed through get_match_id() accessor. WARNING logged at the 4 standard sites where match_config.json is present but missing the 'match' key; INFO logged at window_plan.py:225 where match_config.json doesn't exist yet (expected on cold runs).
+
 **Severity:** LOW-MEDIUM — produces valid but unexpected values when `match_config.json` is absent or the `match` key is missing  
-**Files affected:** `accumulator.py`, `shots_log_addition.py`, `window_plan.py`, `cost_estimator.py`
+**Files affected:** `accumulator.py`, `shots_log_addition.py`, `window_plan.py` (TWO fallback sites with different semantics: line ~224 where match_config.json is present but missing 'match' key → WARNING; line ~228 where match_config.json doesn't exist yet → INFO), `cost_estimator.py`
 
 Multiple scripts contain:
 ```python

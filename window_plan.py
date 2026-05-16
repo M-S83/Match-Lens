@@ -17,6 +17,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from pipeline_accessors import get_match_id
 
 WINDOW_SECONDS = 300    # 5-minute windows
 SNAP_THRESHOLD = 15     # snap window edge to container boundary if within 15s
@@ -220,9 +221,12 @@ def build_window_plan(match_dir: str,
         if os.path.exists(mc_path):
             with open(mc_path, encoding="utf-8") as f:
                 _mc = json.load(f)
-            b["match"] = _mc.get("match", os.path.basename(match_dir))
+            b["match"] = get_match_id(match_dir, _mc)
+            if not _mc.get("match"):
+                print(f"  [!] WARNING: match_config.json missing 'match' key -- using dirname '{b['match']}'", file=sys.stderr)
         else:
-            b["match"] = os.path.basename(match_dir)
+            b["match"] = get_match_id(match_dir, mc=None)
+            print(f"  [i] INFO: match_config.json not found -- using dirname '{b['match']}' (expected on cold runs)")
 
     if "video_duration_seconds" not in b:
         # Try counting frames (1fps = 1s per frame), else ft + 120s buffer

@@ -24,7 +24,7 @@ import os
 import sys
 import glob
 from datetime import datetime
-from pipeline_accessors import get_marking
+from pipeline_accessors import get_marking, get_match_id
 
 
 def _normalise_team_ref(value: str, mc: dict) -> str:
@@ -1495,7 +1495,9 @@ def build_shots_log(match_dir: str) -> dict:
         wp = json.load(f)
 
     windows   = wp.get("windows", [])
-    match_id  = mc.get("match", os.path.basename(match_dir))
+    match_id  = get_match_id(match_dir, mc)
+    if not mc.get("match"):
+        print(f"  [!] WARNING: match_config.json missing 'match' key -- using dirname '{match_id}'", file=sys.stderr)
     home_team = mc.get("home_team", "home")
     away_team = mc.get("away_team", "away")
 

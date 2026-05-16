@@ -16,7 +16,7 @@ Quality levels:
 """
 
 import json, os, sys, argparse
-from pipeline_accessors import get_window_start_seconds, get_window_end_seconds
+from pipeline_accessors import get_window_start_seconds, get_window_end_seconds, get_match_id
 
 # ── Token costs (Anthropic API, claude-sonnet-4-5, April 2026) ──────────────
 TOKENS_PER_FRAME = 1568      # standard resolution image
@@ -83,8 +83,11 @@ def load_match_data(match_dir: str) -> dict:
 
     set_pieces_estimated = max(2, round(len(windows) * 0.15))  # ~15% windows have a set piece
 
+    _match_id = get_match_id(match_dir, mc)
+    if not mc.get("match"):
+        print(f"  [!] WARNING: match_config.json missing 'match' key -- using dirname '{_match_id}'", file=sys.stderr)
     return {
-        "match":           mc.get("match", os.path.basename(match_dir)),
+        "match":           _match_id,
         "total_windows":   len(windows),
         "event_windows":   event_windows,
         "null_windows":    null_windows,
