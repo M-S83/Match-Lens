@@ -409,7 +409,8 @@ Do not add extra top-level fields. Do not rename these fields.
       "end_zone": "zone code",
       "passes": 0,
       "outcome": "retained / turnover / shot / clearance",
-      "sequence_type": "build_up / transition / set_piece / recovery"
+      "sequence_type": "build_up / transition / set_piece / recovery",
+      "sequence_confidence": "high / medium / low"
     }
   ],
 
@@ -831,6 +832,32 @@ Log for BOTH teams.
 === BOTH TEAMS SEQUENCES ===
 Log pass sequences for BOTH teams.
 Tag each: "team": "home_kit" or "team": "away_kit"
+
+Every sequence MUST carry a `sequence_confidence` field tagged against
+what was observable in the frames:
+
+  high   — the ball is visible at or in immediate contact with the
+           start player AND with the end player. Both endpoints
+           confirmed by direct ball observation.
+
+  medium — the ball is visible at one endpoint (start OR end) but not
+           the other. Intermediate positions inferred from player
+           orientation, movement direction, and clustering.
+
+  low    — the ball is not visible at either endpoint. The entire
+           sequence is inferred from player positions, movement, and
+           tactical context — no direct ball observation supports
+           attributing this chain to specific players.
+
+Use `low` honestly. On ball-following footage (VEO, broadcast follow
+cam) the ball is not visible in 20-40% of build-up frames. Reporting
+`low` lets downstream coverage analysis weight your observations
+correctly; reporting `high` when the ball was not visible degrades
+the entire dataset.
+
+If visibility is too poor to identify the start and end players, do
+NOT log the sequence at all. `low` is the floor for "I saw the
+players, I didn't see the ball" — not for "I saw neither."
 {zone_encoding_block}
 {FORMATION_RECOGNITION_GUIDE}
 {SET_PIECE_GUIDE}

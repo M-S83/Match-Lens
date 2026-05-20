@@ -59,6 +59,7 @@ def compute_stats(sequences: list, home_team: str, away_team: str) -> dict:
             return {}
         outcomes    = Counter(s.get("outcome", "unknown") for s in seqs)
         seq_types   = Counter(s.get("sequence_type", "unknown") for s in seqs)
+        seq_confidence = Counter(s.get("sequence_confidence", "unknown") for s in seqs)
         start_zones = Counter(s.get("start_zone", "unknown") for s in seqs)
         end_zones   = Counter(s.get("end_zone", "unknown") for s in seqs)
         lengths     = [s.get("passes", 0) for s in seqs if isinstance(s.get("passes"), (int, float))]
@@ -92,6 +93,7 @@ def compute_stats(sequences: list, home_team: str, away_team: str) -> dict:
             "avg_length":      avg_len,
             "outcomes":        dict(outcomes.most_common()),
             "sequence_types":  dict(seq_types.most_common()),
+            "sequence_confidence_distribution": dict(seq_confidence.most_common()),
             "start_zones":     {k: round(v * 100 / len(seqs)) for k, v in start_zones.most_common()},
             "end_zones":       {k: round(v * 100 / len(seqs)) for k, v in end_zones.most_common()},
             "zone_flow_top10": [{"from": f, "to": t, "count": c}
