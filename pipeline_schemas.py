@@ -62,7 +62,6 @@ SCHEMA_VERSIONS = {
     "agent_player": "1.0",
     "agent_event": "1.0",
     "agent_setpiece": "1.0",
-    "agent_recovery": "1.0",
     "agent_merged": "1.0",
     "running_summary": "1.0",
     "pass_sequences": "1.0",
