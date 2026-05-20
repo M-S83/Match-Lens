@@ -396,8 +396,8 @@ Do not add extra top-level fields. Do not rename these fields.
   },
 
   "pressing": {
-    "home_intensity": 0.0,
-    "away_intensity": 0.0,
+    "home_intensity": "0.0-10.0 float, or null if not observable (see PRESSING INTENSITY block)",
+    "away_intensity": "0.0-10.0 float, or null if not observable",
     "home_trigger": "description or null",
     "away_trigger": "description or null"
   },
@@ -828,6 +828,44 @@ Focus players from teamsheet: {json.dumps([
 === GK DISTRIBUTION -- LOG FOR BOTH TEAMS ===
 Every GK kick (goal kick, from hands, back pass played out) -> add to gk_kicks[].
 Log for BOTH teams.
+
+=== PRESSING INTENSITY ===
+The `pressing.home_intensity` and `pressing.away_intensity` fields are
+0.0-10.0 floats. Each number MUST correspond to observable evidence in
+the frames. Use these anchored tiers:
+
+  0-2  — passive block. No outfield player engages the ball carrier
+         above the team's own half. The team holds shape and waits.
+
+  3-4  — mid-block with sporadic trigger. Typically one striker or
+         lone #10 checks the ball-carrying CB on occasional cues;
+         most attempts to receive are not pressured.
+
+  5-6  — organised mid-press with a clear trigger. A defined press
+         trigger fires (GK receives, CB receives turned, back pass)
+         and at least two players step out in coordination. Press
+         resets when the trigger ends.
+
+  7-8  — sustained high press with multiple players engaging
+         simultaneously. The front line and at least one midfielder
+         press together for extended periods; defensive line steps
+         up to support compactness.
+
+  9-10 — immediate ball-win attempt at every restart. Press starts
+         before the GK can distribute; multiple players close
+         passing lanes simultaneously; the team commits numbers
+         beyond the ball with the intent to win possession high.
+
+Do NOT use intensity as a vague descriptor. A number without a tier-
+matching observable pattern is not grounded — pick the tier whose
+description matches what you can see, then return the midpoint of
+that tier (e.g. 3.5 for mid-block, 5.5 for organised mid-press).
+
+If pressing behaviour is not observable in this window (ball
+follow-cam stays on the ball carrier, defensive shape never visible),
+return null for the relevant intensity field — not 0.0. Zero is the
+floor for "the team chose not to press"; null is the floor for "I
+could not see whether they pressed."
 
 === BOTH TEAMS SEQUENCES ===
 Log pass sequences for BOTH teams.
