@@ -385,7 +385,9 @@ Do not add extra top-level fields. Do not rename these fields.
     "home_variation": "null or describe IP/OOP shape difference e.g. 'defends as 4-5-1 — wingers track back'",
     "away_variation": "null or describe IP/OOP shape difference e.g. 'shape consistent in both phases'",
     "home_formation_basis": "confirmed_from_frames | overridden | hypothesis_unverified",
-    "away_formation_basis": "confirmed_from_frames | overridden | hypothesis_unverified"
+    "away_formation_basis": "confirmed_from_frames | overridden | hypothesis_unverified",
+    "home_formation_evidence": "one sentence stating what was observable in the frames that supports the home_formation label (e.g. 'back four visible with two midfielders in front, wide players holding width on both flanks'). REQUIRED. If home_formation_basis is hypothesis_unverified, the value MUST be 'No confirmatory structure visible; defaulting to lineup.'",
+    "away_formation_evidence": "same — one sentence of observable evidence for the away_formation label; same hypothesis_unverified default."
   },
 
   "defensive_line": {
@@ -568,6 +570,25 @@ FORMATION BASIS — set home_formation_basis and away_formation_basis:
                            from the lineup formation provided
   hypothesis_unverified  — frames don't give sufficient signal to
                            confirm or deny; you are defaulting to lineup
+
+FORMATION EVIDENCE — set home_formation_evidence and away_formation_evidence:
+A one-sentence citation of what was observable in the frames that
+supports the formation label. REQUIRED for every output. The basis
+field is a status flag; the evidence field is the proof.
+
+For confirmed_from_frames and overridden: state which units you saw and
+their relative position. Examples:
+  "Back four visible with double pivot and three attackers ahead of the
+   pivot; #10 drops between lines repeatedly."
+  "Three centre-backs visible with wing-backs holding the touchline;
+   two forwards rotate centrally."
+
+For hypothesis_unverified: the value MUST be exactly:
+  "No confirmatory structure visible; defaulting to lineup."
+
+Do NOT echo the lineup formation label as evidence. "4-2-3-1 because
+the lineup says so" is not evidence — it is the claim. The evidence
+must describe what was visible in the frames independent of the label.
 """
 
 
