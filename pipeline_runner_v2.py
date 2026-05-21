@@ -1151,11 +1151,31 @@ Player: {player}
 Team:   {team}
 
 {"=== GOAL QUESTIONS ===" if event_type == "goal" else "=== SUBSTITUTION QUESTIONS ==="}
-{"1. Shot origin zone (use lateral codes: left_channel / right_channel / halfspace / central)" if event_type=="goal" else "1. Position taken by player coming on"}
-{"2. Shot foot (right/left/header/other)" if event_type=="goal" else "2. Did the formation change?"}
-{"3. Target zone (top_left/top_right/bottom_left/bottom_right/central_high/central_low)" if event_type=="goal" else "3. Did the defensive line height change?"}
-{"4. Full build-up chain in 30s before shot using confirmed positions: [kit] #number pos →[F/S/B] ..." if event_type=="goal" else "4. Did pressing intensity change?"}
+{"1. Shot origin zone (use lateral codes: left_channel / right_channel / halfspace / central)" if event_type=="goal" else "1. Position taken by player coming on (use position codes: gk / cb / lb / rb / dm / cm / am / lm / rm / lw / rw / st / cf)"}
+{"2. Shot foot (right / left / header / other)" if event_type=="goal" else "2. Did the formation change? Answer: 'no' OR 'yes: [old shape] -> [new shape]' (e.g. 'yes: 4-4-2 -> 4-3-3')"}
+{"3. Target zone (top_left / top_right / bottom_left / bottom_right / central_high / central_low)" if event_type=="goal" else "3. Did the defensive line height change? Answer: 'no' OR 'yes: shifted approximately N metres higher/lower' using the PRESSING INTENSITY anchor pitch markers"}
+{"4. Full build-up chain in 30s before shot using confirmed positions and the pass-direction notation:" if event_type=="goal" else "4. Did pressing intensity change? Answer using the PRESSING INTENSITY anchor tiers. 'no' OR 'yes: from tier X to tier Y' (e.g. 'yes: from 3-4 mid-block to 7-8 high press')"}
+{'''       [kit] #number pos ->F [kit] #number pos ->S [kit] #number pos ->B ...
+       where ->F = forward pass (toward opponent goal)
+             ->S = square / lateral pass (across the pitch)
+             ->B = backward pass (toward own goal)
+       If the 30-second chain appears to start before this window,
+       state the earliest observable link as the chain entry point
+       and note: "earlier phases not visible in this window."
+       Do NOT construct chain links from formation context — only
+       from directly observable frames.''' if event_type=="goal" else ""}
 {"5. Defensive shape at moment of shot" if event_type=="goal" else ""}
+
+=== INCONCLUSIVE HANDLING ===
+If any question cannot be answered from the frames (shot obscured by a
+cluster of players, ball not visible at contact, build-up phase occurred
+before this window's start, substitution off-camera, etc.):
+  - Return null for that field.
+  - In the events[] entry, add a `notes_unobservable` field listing
+    which questions could not be answered and why.
+  - Do NOT estimate. Do NOT infer from structural context what the
+    frames did not show. The structural agent has already done that
+    work; the event agent's job is direct observation only.
 
 Return JSON with: event_agent=true, events[], shape_vs_structural_agent{{agrees, disputes}}
 Follow the Step 3d Event Agent schema from SKILL.md.
