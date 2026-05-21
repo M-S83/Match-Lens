@@ -197,6 +197,13 @@ OMIT the "Pass Network — Top Player Pairs" section entirely. Add a one-line
 note after Sequence Outcomes: "Player pair data not available for this match —
 pass_sequences.json does not carry player-level sequence attribution."
 
+PATTERN ANALYSIS TIMESTAMP RULE: Do NOT include per-sequence timestamps
+in the Pattern Analysis section. The pre-computed stats block fed below
+does not contain per-sequence timestamps. List patterns by origin zone,
+end zone, count, and average length — never by minute marker. If you
+catch yourself writing "11m10s" or "74m54s", the timestamp is
+fabricated; remove it and aggregate the sequences by route instead.
+
 Output: pure markdown. No preamble before the first heading.
 """
 
