@@ -227,24 +227,31 @@ The kick count is the evidence. The accumulator already applied
 both the absolute threshold (≥5 kicks) and the relative-share
 floor (top zone ≥35% of total) before labelling "consistent".
 
-NOTE: the example phrasings below predate the NO SUGGESTIONS RULE
-and contain banned imperative coaching language ("press his...",
-"force play..."). They are kept for structural reference only.
-The actual report wording must follow NO SUGGESTIONS RULE: state
-the observed distribution and any in-match consequence, no
-recommendations or instructions.
+For zone (state the distribution and any in-match consequence):
+"Neuer distributed predominantly to the right channel throughout
+the match (7 of 11 goal kicks -- left_channel 3, right_channel 7,
+central 1) [A]. PSG's first-half pressing shape did not
+consistently position a press trigger on his preferred
+distribution side; in the second half Mbappe and Dembele
+shifted to cover the right channel and Neuer's distribution
+broke up on two occasions, producing turnovers in midfield [B]."
 
-For zone:
-"Neuer distributes predominantly to the right channel
-(7/11 kicks -- left_channel 3, right_channel 7, central 1).
-Opposition teams should press his right side distribution
-to force play back. [A if consistent, B if tendency]"
-For length:
-"Safonov favours short distribution (8/11 kicks short).
-His build-up is patient -- press the centre-backs early
-when he plays short. [A/B per confidence]"
+For length (state the distribution and any in-match consequence):
+"Safonov favoured short distribution from goal kicks (8 of 11
+kicks short to the centre-backs) [A]. Bayern engaged the
+centre-backs early on five of those eight restarts, forcing
+two ball recoveries in the defending third and three resets
+back to Safonov [B]."
+
 Do not mention distribution if gk_total_kicks < 5.
 Do not guess distribution pattern if not in the data.
+
+Both examples above describe what happened. Neither recommends,
+suggests, or instructs. The "in-match consequence" sentence is
+factual reporting of what actually occurred against the observed
+pattern -- if the opposition did not engage the pattern, say so
+plainly ("PSG did not consistently engage Neuer's right side
+during the match"). Do not project, do not infer.
 
 OBSERVED PATTERN RULE (Fix 53; replaces the prior EXPLOITABLE PATTERN
 RULE): After identifying a consistent player tendency, state the
