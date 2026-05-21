@@ -1373,13 +1373,31 @@ delivery_type:        inswinger / outswinger / driven / lofted / flick_on / shor
 delivery_target_zone: near_post / penalty_spot / far_post / edge_of_box / short_corner / null
                       (where the delivery was AIMED -- may differ from where it ENDED UP)
 runners:              For each attacking-team runner visible in the burst, log:
-                        runner_id          -- shirt number if visible, else kit+position label
+                        runner_id          -- shirt number (e.g. "#7") if visible. If the number
+                                              is not clearly visible, use a kit + position label
+                                              (e.g. "red CB", "blue near_post_runner"). NEVER use
+                                              a player name. The set piece prompt does not
+                                              receive the team roster; any name produced here is
+                                              unverified and will not join correctly to downstream
+                                              individual_observations.
                         start_zone         -- edge_of_box / penalty_spot / near_post / far_post / outside_box
                         run_zone           -- where the runner ended at point of contact
                         run_type           -- near_post_run / far_post_run / back_post / front_post /
                                              penalty_spot_hold / blocking_run / second_phase_runner / decoy
-                        defender_assigned  -- shirt number or position label, or null if unmarked
-                      Three to five visible runners is typical for a corner. Do not invent runners.
+                        defender_assigned  -- shirt number ("#N") or kit + position label
+                                              ("blue CB", "red FB"). Same rule as runner_id:
+                                              NEVER a name. Or null if unmarked.
+
+                      Type-specific runner-count anchors:
+                        corner:               3-5 visible runners is typical (front post,
+                                              back post, penalty spot, edge of box,
+                                              possible second-phase runner outside)
+                        direct_fk (shooting): runner count inside the box is typically 2-4;
+                                              also note wall_size and wall_position
+                        indirect_fk:          3-5 visible runners (same as corner)
+                        throw_in (final third): 2-3 visible runners is typical (one short
+                                              receiver, one or two box arrivals)
+                      Do not invent runners. If only one runner is clearly visible, log one.
 wall_size:            number, for direct free kicks within shooting range only. null otherwise
 wall_position:        near_post / central / far_post / null
 second_phase:         object with:
