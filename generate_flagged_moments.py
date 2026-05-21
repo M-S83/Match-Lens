@@ -174,7 +174,17 @@ EVIDENCE RULES:
 - Goals, cards, and substitutions are CONFIRMED FACTS from match_config.
 - Tactical patterns and set pieces from running_summary.key_moments and
   running_summary.set_pieces — include only high or medium confidence.
-- Deduplicate by timestamp ± 30 seconds. Sort chronologically by match minute.
+- Deduplicate ONLY where two moments describe the SAME EVENT (e.g. the
+  same foul logged twice, or two records of the same goal). A goal and
+  the tactical context that enabled it are DISTINCT moments even if
+  their timestamps are within 30 seconds of each other — keep both.
+  A card and the foul it was given for are distinct moments — keep
+  both. A set piece and the goal it led to are distinct moments — keep
+  both. The ±30s window is a candidate filter, not an exclusion rule:
+  if you find two records within 30 seconds, ask whether they describe
+  the same event. If yes, merge. If no (different event type, different
+  player, different tactical content), keep both.
+- Sort chronologically by match minute.
 - Target 10-20 moments total.
 
 VIDEO TIMESTAMP RULE:
@@ -226,8 +236,18 @@ COMPLETE PIPELINE DATA:
 
 Produce flagged_moments.md for {home} vs {away}.
 Target 10-20 chronological moments. Include all confirmed goals and cards.
-Include 2-3 tactically meaningful substitutions. Include the most notable
-set pieces and tactical patterns from running_summary (high/medium only).
+
+Include 2-3 tactically meaningful substitutions. "Tactically meaningful"
+means the substitution produced an observable change in the team's
+shape, line height, or pressing behaviour after it was made. Pure
+personnel rotations with no structural impact are NOT meaningful in
+this sense -- list them as a personnel change only, without tactical
+attribution. If the evidence grade for any structural change after a
+substitution is below C, treat that substitution as a personnel change
+only (no tactical claim).
+
+Include the most notable set pieces and tactical patterns from
+running_summary (high/medium only).
 Apply all language rules. No preamble before the first heading.
 """
 
