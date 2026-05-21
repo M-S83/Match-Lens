@@ -400,8 +400,8 @@ Do not add extra top-level fields. Do not rename these fields.
   "pressing": {
     "home_intensity": "0.0-10.0 float, or null if not observable (see PRESSING INTENSITY block)",
     "away_intensity": "0.0-10.0 float, or null if not observable",
-    "home_trigger": "description or null",
-    "away_trigger": "description or null"
+    "home_trigger": "canonical code from PRESSING TRIGGER VOCABULARY, or null",
+    "away_trigger": "canonical code from PRESSING TRIGGER VOCABULARY, or null"
   },
 
   "pass_sequences": [
@@ -887,6 +887,42 @@ follow-cam stays on the ball carrier, defensive shape never visible),
 return null for the relevant intensity field — not 0.0. Zero is the
 floor for "the team chose not to press"; null is the floor for "I
 could not see whether they pressed."
+
+=== PRESSING TRIGGER VOCABULARY ===
+The `pressing.home_trigger` and `pressing.away_trigger` fields MUST
+use one of these canonical codes (or null). Free-text triggers cannot
+aggregate across windows; the codes can.
+
+  back_pass               — opposition plays a backward pass; press
+                            fires on the receiving defender
+  gk_in_possession        — goalkeeper receives or holds the ball;
+                            press fires on the GK directly
+  cb_receiving_turned     — centre-back receives with their back to
+                            their own goal; press fires on the
+                            attempted turn
+  cb_receiving_open       — centre-back receives facing forward; press
+                            fires on the next decision (pass forward
+                            or carry)
+  fb_receiving            — full-back receives the ball; press fires
+                            on the touchline trap
+  free_kick_restart       — opposition restarts from a free kick in
+                            their defensive third; press fires on the
+                            short option
+  throw_in_restart        — opposition takes a throw-in in their
+                            defensive or middle third; press fires on
+                            the receiver
+  no_trigger_observed     — pressing intensity was non-zero but no
+                            specific trigger pattern was identifiable
+  null                    — no pressing observed, or pressing
+                            behaviour not observable in this window
+                            (matches null intensity)
+
+Pick the single trigger that fires MOST OFTEN in this window. If two
+triggers fire roughly equally, pick the one that produced the higher
+press intensity. Do NOT invent triggers ("press_on_central_play",
+"press_on_long_ball") — if the pattern you saw doesn't fit one of
+the codes above, use no_trigger_observed and describe what you saw in
+the window's notes field.
 
 === BOTH TEAMS SEQUENCES ===
 Log pass sequences for BOTH teams.
