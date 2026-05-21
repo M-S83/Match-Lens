@@ -1075,14 +1075,102 @@ WINDOW:    {window_id}
 {structural_block}
 {roster_block}{ocr_block}
 {action_vocab_block}
-=== MINIMUM REQUIREMENTS ===
-- At least 5 individual_observations per window
-- At least 2 for opposition players
-- At least 1 duels[] entry per visible physical contest
-- For every attacker in possession: also log 1 out_of_possession observation
+{_player_minimums_block(source_profile)}
 
-Return JSON with: player_agent=true, individual_observations[], duels[]
-Follow the Step 3b Player Agent schema from SKILL.md.
+=== INDIVIDUAL OBSERVATION SCHEMA — REQUIRED FOR EVERY ENTRY ===
+Each entry in individual_observations[] MUST carry these fields:
+
+  player              "#N FirstName LastName" or "#N position_label" if name unknown
+  team                "home" or "away"
+  position            gk / cb / lb / rb / dm / cm / am / lm / rm / lw / rw / st / cf
+  action_category     ball_carrying / distribution / hold_up_play /
+                      movement_off_ball / finishing / set_piece_delivery /
+                      pressing_behaviour / defensive_positioning /
+                      aerial_ability / duels / recovery_runs /
+                      gk_distribution / gk_positioning / gk_shot_stopping /
+                      positional_tendency / receiving_orientation /
+                      pre_receive_scan / first_touch_direction
+  observation         specific description -- what happened, not evaluation
+  observation_type    strength / weakness / trait / neutral
+  outcome             success / failure / neutral / unclear
+  zone                nested object: {{vertical_third, lateral_lane,
+                      named_zone (or null), between_lines (or null)}}
+  trigger_context     under_pressure / in_space / against_press /
+                      on_transition / from_set_piece / restart / unclear
+  game_phase          in_possession / out_of_possession / transition / set_piece
+  frequency           single / repeated / consistent
+  confidence          high / medium / low
+  timestamp           "MMmSSs"
+  frames              ["frame_XXmYYs.jpg", ...]
+  preferred_foot      right / left / both / unknown   (if observable)
+  physical_profile    {{height_impression, pace_impression, build}}  (if observable)
+
+=== DUEL SCHEMA — REQUIRED FOR EVERY DUEL ENTRY ===
+Each entry in duels[] MUST carry:
+
+  timestamp           "MMmSSs"
+  type                aerial / ground / tackle
+  winner              home_kit / away_kit / contested / unknown
+  zone                nested object (same shape as above)
+  players_visible     ["#N home_kit", "#N away_kit"]
+  post_duel_outcome   retained_possession / lost_to_second_ball /
+                      free_kick_won / free_kick_conceded /
+                      ball_out_of_play / unclear
+
+post_duel_outcome is REQUIRED. A duel without an outcome is incomplete --
+a CB who wins headers but loses every second ball is a flick-on
+contributor, not an aerial strength.
+
+=== OUTPUT FORMAT ===
+Return ONLY raw JSON. No prose. No preamble. No markdown fences.
+
+{{
+  "player_agent": true,
+  "window": "{window_id}",
+  "individual_observations": [ ...entries per the schema above... ],
+  "duels": [ ...entries per the duel schema above... ]
+}}
+"""
+
+
+def _player_minimums_block(source_profile: dict) -> str:
+    """Source-scaled MINIMUM REQUIREMENTS block per SKILL.md Step 3b.
+
+    Scales observation counts by source_profile.visibility_scores
+    .off_ball_coverage_score so that low-coverage sources (ball-follow
+    footage where the camera rarely shows off-ball player behaviour)
+    don't get held to minimums they cannot meet. High-coverage
+    tactical-wide footage gets the full minimums.
+
+    Tiers match visibility_minimums.compute_minimums().
+    """
+    coverage = (
+        (source_profile or {})
+        .get("visibility_scores", {})
+        .get("off_ball_coverage_score", 0.7)  # default to high if unknown
+    )
+
+    if coverage >= 0.7:
+        tier, total, opp, gk = "high",    5, 2, "1 every 3 windows"
+    elif coverage >= 0.4:
+        tier, total, opp, gk = "partial", 4, 1, "1 every 5 windows"
+    else:
+        tier, total, opp, gk = "low",     3, 1, "not enforced -- source limit"
+
+    return f"""=== MINIMUM REQUIREMENTS (source-scaled) ===
+Source off_ball_coverage_score: {coverage:.2f}  -->  {tier} coverage tier.
+
+- At least {total} individual_observations for this window.
+- At least {opp} opposition-player observations for this window.
+- GK observation frequency: {gk}.
+- At least 1 duels[] entry per visible physical contest.
+- For every attacker observed in possession: also log 1 corresponding
+  out-of-possession observation when off-ball behaviour is visible.
+
+If the window is genuinely quiet (ball follow-cam stays narrow, off-ball
+player behaviour not visible for extended stretches), report fewer
+observations honestly. Inventing observations to hit the minimum degrades
+the dataset more than under-reporting.
 """
 
 
