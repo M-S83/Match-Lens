@@ -1042,6 +1042,7 @@ def _accumulate_player_tendencies(logs_dir: str, mc: dict) -> dict:
         "pos":                    "",
         "run_type":               Counter(),
         "positioning":            Counter(),
+        "between_lines":          Counter(),
         "defensive_contribution": Counter(),
         "direct_play":            Counter(),
         "aerial":                 Counter(),
@@ -1169,6 +1170,15 @@ def _accumulate_player_tendencies(logs_dir: str, mc: dict) -> dict:
             elif zone:
                 t["positioning"]["standard"] += 1
 
+            # Between-lines extraction from the nested zone object (v3 player
+            # prompt populates zone.between_lines reliably; legacy obs where
+            # zone is a string skip this block via the isinstance check).
+            zone_obj = obs.get("zone", {})
+            if isinstance(zone_obj, dict):
+                bl = zone_obj.get("between_lines")
+                if bl in ("between_def_mid", "between_mid_fwd", "between_fb_cb"):
+                    t["between_lines"][bl] += 1
+
             context = str(obs.get("context", "")).lower()
             if "track" in context or "press" in context or "cover" in context:
                 t["defensive_contribution"]["tracks_back"] += 1
@@ -1253,7 +1263,7 @@ def _accumulate_player_tendencies(logs_dir: str, mc: dict) -> dict:
             "windows_appeared": data["windows_appeared"],
         }
 
-        for field in ("run_type", "positioning", "defensive_contribution"):
+        for field in ("run_type", "positioning", "between_lines", "defensive_contribution"):
             counter = data[field]
             if counter:
                 dom, count, conf = _dominant(counter)
