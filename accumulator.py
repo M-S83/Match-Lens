@@ -283,6 +283,7 @@ def update_running_summary(merged_path: str,
             summary = json.load(f)
         # Ensure all expected keys exist (handles partial or legacy files)
         for key in ["formation_history", "pressing_by_window", "line_height_by_window",
+                    "line_height_m_by_window",
                     "match_state_by_window", "possession_by_window",
                     "shots_for", "shots_against", "flagged_moments", "key_moments",
                     "individual_observations", "set_pieces", "set_pieces_rejected",
@@ -300,6 +301,7 @@ def update_running_summary(merged_path: str,
             "formation_history":      [],
             "pressing_by_window":     [],
             "line_height_by_window":  [],
+            "line_height_m_by_window":[],
             "match_state_by_window":  [],
             "shots_for":              [],
             "shots_against":          [],
@@ -421,6 +423,43 @@ def update_running_summary(merged_path: str,
         "end_pct":  end_pct,
         "end_m":    _pct_to_m(end_pct),
         "shifts":   dl.get("notable_shifts", []),
+    })
+
+    # v3 line_height_m_by_window -- fixes the home/away vs avg_pct field-name
+    # mismatch. The structural agent schema emits home_height_pct and
+    # away_height_pct (not avg_pct). The old line_height_by_window above keeps
+    # reading dl.get("avg_pct") for backward compatibility, which is None on
+    # current structural outputs. Downstream deep_skill_metrics reads
+    # line_height_m_by_window looking for avg_m_approx; this block populates it.
+    home_height_pct = dl.get("home_height_pct")
+    away_height_pct = dl.get("away_height_pct")
+
+    # Derive avg_pct: prefer home/away mean if either is present,
+    # fall back to legacy dl.get("avg_pct") if not.
+    if home_height_pct is not None and away_height_pct is not None:
+        derived_avg_pct = round((home_height_pct + away_height_pct) / 2.0, 1)
+    elif home_height_pct is not None:
+        derived_avg_pct = home_height_pct
+    elif away_height_pct is not None:
+        derived_avg_pct = away_height_pct
+    else:
+        derived_avg_pct = avg_pct  # legacy fallback
+
+    # avg_m_approx: prefer direct field if present, derive from pct otherwise
+    avg_m_approx = dl.get("avg_m_approx")
+    if avg_m_approx is None:
+        avg_m_approx = _pct_to_m(derived_avg_pct)
+
+    summary["line_height_m_by_window"].append({
+        "window":              w.get("window"),
+        "agent_id":            w.get("agent_id"),
+        "avg_pct":             derived_avg_pct,
+        "avg_m_approx":        avg_m_approx,
+        "line_width_m_approx": dl.get("line_width_m_approx"),
+        "space_behind_m":      dl.get("space_behind_m"),
+        "home_height_pct":     home_height_pct,
+        "away_height_pct":     away_height_pct,
+        "shifts":              dl.get("notable_shifts", []),
     })
 
     # Shots -- separate by home/away. Fix 33b: pipeline produces
@@ -1288,6 +1327,7 @@ def accumulate_all_windows(match_dir: str) -> dict:
             "formation_history":      [],
             "pressing_by_window":     [],
             "line_height_by_window":  [],
+            "line_height_m_by_window":[],
             "match_state_by_window":  [],
             "shots_for":              [],
             "shots_against":          [],
