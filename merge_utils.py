@@ -262,7 +262,7 @@ def merge_dual_agents(a_path: str, b_path: str, out_path: str,
                     "Consider whether a press activation or transition mid-window explains the split.",
         }
         review_required.append(
-            f"line_height: A={lh_a}%, B={lh_b}% — delta {round(abs(lh_a-lh_b),1)}%"
+            f"line_height: A={lh_a}%, B={lh_b}% -- delta {round(abs(lh_a-lh_b),1)}%"
         )
 
     # -- Merge pressing --------------------------------------------------------
@@ -421,7 +421,7 @@ def merge_dual_agents(a_path: str, b_path: str, out_path: str,
     issues = len(review_required)
     print(f"  [{agent_id}] Dual   -> {os.path.basename(out_path)}"
           f" | issues: {issues}"
-          + (f" ⚠ review needed" if issues else ""))
+          + (f" [!] review needed" if issues else ""))
 
     if review_required:
         for issue in review_required:
