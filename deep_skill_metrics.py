@@ -736,12 +736,13 @@ def build_prose_interpretation(metric_name, value, sample_count=0):
         if isinstance(value, dict):
             total = value.get("total_set_pieces", 0)
             prefix = "preliminary reading (small sample): " if status == "preliminary" else ""
-            top_zone = max(value.get("by_zone",{}),
-                          key=value["by_zone"].get) if value.get("by_zone") else "unknown"
-            top_del  = max(value.get("by_delivery_type",{}),
-                          key=value["by_delivery_type"].get) if value.get("by_delivery_type") else "unknown"
-            top_outcome = max(value.get("by_outcome",{}),
-                             key=value["by_outcome"].get) if value.get("by_outcome") else "unknown"
+            # `or "unknown"` guards against None keys in the by_* dicts.
+            top_zone = (max(value.get("by_zone",{}),
+                          key=value["by_zone"].get) if value.get("by_zone") else "unknown") or "unknown"
+            top_del  = (max(value.get("by_delivery_type",{}),
+                          key=value["by_delivery_type"].get) if value.get("by_delivery_type") else "unknown") or "unknown"
+            top_outcome = (max(value.get("by_outcome",{}),
+                             key=value["by_outcome"].get) if value.get("by_outcome") else "unknown") or "unknown"
             return (f"{prefix}{total} set pieces observed: "
                     f"most from {top_zone.replace('_',' ')}, "
                     f"predominantly {top_del.replace('_',' ')} deliveries, "
@@ -760,8 +761,9 @@ def build_prose_interpretation(metric_name, value, sample_count=0):
             avg_seq = value.get("avg_sequence_length")
             prefix  = "preliminary reading: " if status == "preliminary" else ""
 
-            top_zone  = max(by_zone,  key=by_zone.get)  if by_zone  else "unknown"
-            top_route = max(by_route, key=by_route.get) if by_route else "unknown"
+            # `or "unknown"` guards against None keys in by_zone / by_route.
+            top_zone  = (max(by_zone,  key=by_zone.get)  if by_zone  else "unknown") or "unknown"
+            top_route = (max(by_route, key=by_route.get) if by_route else "unknown") or "unknown"
 
             zone_label  = {"own_half":"own half","midfield":"the middle third",
                           "own third":"own third","final third":"the final third"}.get(
@@ -1444,19 +1446,25 @@ def calc_set_piece_delivery_profile(summary):
     sps = summary.get("set_pieces", [])
     if not sps:
         return None, 0, ["suggestive"]
-    by_zone     = Counter(sp.get("zone", sp.get("type", "unknown")) for sp in sps)
-    by_delivery = Counter(sp.get("delivery", "unknown") for sp in sps)
-    by_outcome  = Counter(sp.get("outcome", "unknown") for sp in sps)
+    # NOTE: use `or "unknown"` rather than dict.get(default) because set_piece
+    # entries often carry explicit None for these fields (taker, delivery,
+    # outcome) -- the default kwarg only kicks in when the key is MISSING,
+    # not when the value is None. Without this coercion, by_delivery_type
+    # ends up {None: N, ...}, max() returns None, and downstream `.replace()`
+    # crashes 3k_metrics. (Bayern vs PSG 2026-05-06 regression.)
+    by_zone     = Counter((sp.get("zone") or sp.get("type") or "unknown") for sp in sps)
+    by_delivery = Counter((sp.get("delivery") or "unknown") for sp in sps)
+    by_outcome  = Counter((sp.get("outcome") or "unknown") for sp in sps)
     by_marking  = Counter(get_marking(sp) or "unknown" for sp in sps)
     bodies      = [sp.get("bodies_in_box") for sp in sps if sp.get("bodies_in_box")]
     zone_detail = {}
     for sp in sps:
-        z = sp.get("zone", sp.get("type", "unknown"))
+        z = sp.get("zone") or sp.get("type") or "unknown"
         if z not in zone_detail:
             zone_detail[z] = {"count": 0, "deliveries": [], "outcomes": []}
         zone_detail[z]["count"]      += 1
-        zone_detail[z]["deliveries"].append(sp.get("delivery", "unknown"))
-        zone_detail[z]["outcomes"].append(sp.get("outcome", "unknown"))
+        zone_detail[z]["deliveries"].append(sp.get("delivery") or "unknown")
+        zone_detail[z]["outcomes"].append(sp.get("outcome") or "unknown")
     for z in zone_detail:
         d = zone_detail[z]
         d["most_common_delivery"] = Counter(d["deliveries"]).most_common(1)[0][0] if d["deliveries"] else None
@@ -1963,8 +1971,11 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
 
     v, w, t = calc_set_piece_delivery_profile(summary)
     if v:
-        top_zone = max(v["by_zone"], key=v["by_zone"].get) if v["by_zone"] else "unknown"
-        top_del  = max(v["by_delivery_type"], key=v["by_delivery_type"].get) if v["by_delivery_type"] else "unknown"
+        # `or "unknown"` guards against by_zone/by_delivery_type containing a
+        # None key (set_pieces can carry explicit None for these fields);
+        # without the guard max() returns None and .replace() crashes.
+        top_zone = (max(v["by_zone"], key=v["by_zone"].get) if v["by_zone"] else "unknown") or "unknown"
+        top_del  = (max(v["by_delivery_type"], key=v["by_delivery_type"].get) if v["by_delivery_type"] else "unknown") or "unknown"
         v["summary"] = (f"{v['total_set_pieces']} set pieces: "
                         f"most from {top_zone.replace('_',' ')}, "
                         f"most common delivery: {top_del.replace('_',' ')}")
