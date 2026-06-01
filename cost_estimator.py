@@ -44,11 +44,13 @@ INPUT_COST_PER_TOKEN  = 3.00  / 1_000_000
 OUTPUT_COST_PER_TOKEN = 15.00 / 1_000_000
 
 QUALITY_PROFILES = {
-    "economy":   {"frames_per_window": 10,  "event_frames": 75,  "label": "Economy (~$6)"},
-    "standard":  {"frames_per_window": 30,  "event_frames": 150, "label": "Standard (~$11)"},
-    "full":      {"frames_per_window": 60,  "event_frames": 300, "label": "Full quality (~$20)"},
-    "full_1fps": {"frames_per_window": 300, "event_frames": 300, "label": "Full 1fps 512×288",
-                  "tokens_per_frame": 170},  # single tile — cheaper than standard
+    "economy":      {"frames_per_window": 10, "event_frames": 75,  "label": "Economy (~$6)"},
+    "standard":     {"frames_per_window": 30, "event_frames": 150, "label": "Standard (~$11)"},
+    "full":         {"frames_per_window": 60, "event_frames": 300, "label": "Full quality (~$20)"},
+    "high_density": {"frames_per_window": 90, "event_frames": 90,  "label": "High-density (90fr @ 512×288)",
+                     "tokens_per_frame": 170},  # single tile — cheaper than standard
+    "full_1fps":    {"frames_per_window": 90, "event_frames": 90,  "label": "Full 1fps (capped at 90fr @ 512×288)",
+                     "tokens_per_frame": 170},  # capped from 300 per Anthropic 100-image API limit
 }
 
 # ── Load match data ──────────────────────────────────────────────────────────

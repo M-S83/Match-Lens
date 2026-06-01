@@ -134,15 +134,28 @@ def _prepare_frames(frame_paths: list,
 # ── Frame sampling ────────────────────────────────────────────────────────────
 
 QUALITY_PROFILES = {
-    "economy":   {"frames_per_window": 10,  "event_frames": 10,  "resize_w": None, "resize_h": None},
-    "standard":  {"frames_per_window": 30,  "event_frames": 30,  "resize_w": None, "resize_h": None},
-    "full":      {"frames_per_window": 60,  "event_frames": 60,  "resize_w": None, "resize_h": None},
-    "full_1fps": {"frames_per_window": 300, "event_frames": 300, "resize_w": 512,  "resize_h": 288},
+    "economy":      {"frames_per_window": 10, "event_frames": 10, "resize_w": None, "resize_h": None},
+    "standard":     {"frames_per_window": 30, "event_frames": 30, "resize_w": None, "resize_h": None},
+    "full":         {"frames_per_window": 60, "event_frames": 60, "resize_w": None, "resize_h": None},
+    "high_density": {"frames_per_window": 90, "event_frames": 90, "resize_w": 512,  "resize_h": 288},
+    "full_1fps":    {"frames_per_window": 90, "event_frames": 90, "resize_w": 512,  "resize_h": 288},
 }
 # NOTE: Event frames capped to frames_per_window to stay within API request size.
 # The event agent uses a focused prompt — fewer targeted frames are more reliable
 # than a large payload that triggers "Too much memory" rejections. (Fix 7)
-# full_1fps: 300 frames at 512×288 ≈ 51,000 tokens/window (cheaper than standard).
+#
+# API HARD LIMIT: Anthropic Messages API rejects requests with >100 images per
+# message ("Too much media: 0 document pages + N images > 100"). Every preset
+# must therefore stay at frames_per_window <= 100 (with a safety margin).
+#
+# high_density (NEW): 90 frames at 512×288 — densest sampling currently
+#   feasible against the 100-image limit; ~3x the density of standard.
+#
+# full_1fps (CAPPED from 300 -> 90): the historical name implied one frame per
+#   second across a 5-minute window (= 300 frames) but this never worked
+#   against the live API. Capped to 90 with the same resize. Identical to
+#   high_density today; preserved as a name for backward compatibility with
+#   any external scripts / docs referencing "full_1fps".
 
 def sample_frames(all_frames: list, n: int) -> list:
     """Select n evenly spaced frames from a list."""
@@ -2317,7 +2330,7 @@ def _window_has_event(wid: str, events: list, windows: list) -> bool:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Match Lens pipeline v2")
     parser.add_argument("match_dir", help="Match directory path")
-    parser.add_argument("--quality",  choices=["economy","standard","full","full_1fps"],
+    parser.add_argument("--quality",  choices=list(QUALITY_PROFILES.keys()),
                         default="standard")
     parser.add_argument("--resume",  action="store_true",
                         help="Resume from checkpoint")
