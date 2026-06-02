@@ -419,13 +419,34 @@ Do not add extra top-level fields. Do not rename these fields.
 
   "pass_sequences": [
     {
-      "team": "home_kit or away_kit",
-      "start_zone": "zone code",
-      "end_zone": "zone code",
-      "passes": 0,
-      "outcome": "retained / turnover / shot / clearance",
-      "sequence_type": "build_up / transition / set_piece / recovery",
-      "sequence_confidence": "high / medium / low"
+      "team": "home_kit",
+      "start_zone": "defending_third",
+      "end_zone": "middle_third",
+      "passes": 3,
+      "outcome": "lost_possession",
+      "sequence_type": "build_up",
+      "sequence_confidence": "high",
+      "chain_notation": "[#1] ->F [#5] ->S [#6] ->lost_possession"
+    },
+    {
+      "team": "away_kit",
+      "start_zone": "middle_third",
+      "end_zone": "attacking_third",
+      "passes": 7,
+      "outcome": "shot",
+      "sequence_type": "build_up",
+      "sequence_confidence": "medium",
+      "chain_notation": "[#6] ->F [#10] ->S [#7] ->F [#9] ->shot"
+    },
+    {
+      "team": "home_kit",
+      "start_zone": "attacking_third",
+      "end_zone": "attacking_third",
+      "passes": 2,
+      "outcome": "set_piece",
+      "sequence_type": "transition",
+      "sequence_confidence": "low",
+      "chain_notation": "[#11] ->F [LCB] ->set_piece"
     }
   ],
 
@@ -938,8 +959,36 @@ the codes above, use no_trigger_observed and describe what you saw in
 the window's notes field.
 
 === BOTH TEAMS SEQUENCES ===
-Log pass sequences for BOTH teams.
+Log EVERY distinct possession sequence in the window, for BOTH teams.
 Tag each: "team": "home_kit" or "team": "away_kit"
+
+A possession sequence is any chain of TWO OR MORE consecutive passes
+by the same team (or one pass that leads directly to a shot, cross,
+or set piece). A sequence STARTS at:
+  - possession gain (interception, tackle win, loose ball recovery)
+  - restart (throw-in, free kick, corner, goal kick)
+  - GK distribution
+And ENDS at:
+  - turnover (opposition wins ball)
+  - shot
+  - cross into the box
+  - clearance under pressure
+  - set piece concession (foul, ball out)
+  - end_of_window (sequence still in progress at the final frame)
+
+Log each sequence as a chain of touches in the chain_notation field:
+  [#N] ->F [#N] ->S [#N] ->[outcome]
+Direction codes: F=forward  S=sideways  B=backward
+Outcome vocabulary: shot / cross / lost_possession / clearance /
+                    set_piece / end_of_window
+
+Touch tokens may be either jersey number [#N] or position label [POS]:
+  Use [#N] when the jersey number is clearly readable
+  Use [POS] when the number is not legible but the player's role is
+  clear from positioning. Valid POS codes: GK, RB, RCB, LCB, LB,
+  RWB, LWB, DM, CM, RCM, LCM, AM, RW, LW, RM, LM, CF, ST
+  Mixing within a single chain is fine:
+    [#10] ->F [LCB] ->S [#7] ->shot
 
 Every sequence MUST carry a `sequence_confidence` field tagged against
 what was observable in the frames:
@@ -949,23 +998,40 @@ what was observable in the frames:
            confirmed by direct ball observation.
 
   medium — the ball is visible at one endpoint (start OR end) but not
-           the other. Intermediate positions inferred from player
+           the other. Intermediate touches inferred from player
            orientation, movement direction, and clustering.
 
-  low    — the ball is not visible at either endpoint. The entire
-           sequence is inferred from player positions, movement, and
-           tactical context — no direct ball observation supports
-           attributing this chain to specific players.
+  low    — the ball is not visible at either endpoint, but you can
+           still identify the start and end players from positional
+           context. The chain itself is inferred. This is the most
+           under-logged category historically: when you are tempted to
+           skip a sequence because you "didn't quite see it clearly,"
+           log it at low instead.
 
-Use `low` honestly. On ball-following footage (VEO, broadcast follow
-cam) the ball is not visible in 20-40% of build-up frames. Reporting
-`low` lets downstream coverage analysis weight your observations
-correctly; reporting `high` when the ball was not visible degrades
-the entire dataset.
+`low` is acceptable and expected on ball-following footage where the
+ball is occluded in 20-40% of build-up frames. Log the sequence at
+`low` rather than skipping it. Downstream coverage analysis weights
+low-confidence sequences correctly; skipping them silently undercounts
+the match.
 
-If visibility is too poor to identify the start and end players, do
-NOT log the sequence at all. `low` is the floor for "I saw the
-players, I didn't see the ball" — not for "I saw neither."
+ONLY skip a sequence entirely when you cannot identify EITHER endpoint
+player. That is the floor: "I cannot tell who had the ball" — not "I
+cannot see the ball."
+
+EXHAUSTIVENESS CHECK: a five-minute window of open play typically
+contains 15-30 distinct possession sequences when home and away
+sequences are combined. If your total (home + away) for the window
+falls between 15 and 30, that is normal. If it falls below 15 in a
+window with sustained open play and no major stoppages, you have
+most likely missed routine recycling sequences in midfield - review
+the frames again before finalising.
+
+Open-play sequences that did not progress are still sequences. Goal
+kicks distributed short are still sequences. A throw-in followed by
+two passes back to a CB is still a sequence. Windows with long
+stoppages (lengthy injuries, VAR checks, multiple substitutions)
+legitimately produce fewer sequences - use honest judgement, not
+quota-hitting.
 {zone_encoding_block}
 {FORMATION_RECOGNITION_GUIDE}
 {SET_PIECE_GUIDE}
