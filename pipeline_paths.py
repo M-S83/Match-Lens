@@ -11,6 +11,48 @@ or naming variant is a one-line change here.
 
 import glob
 import os
+import re
+
+
+# Match a window label embedded in merged-file basenames.
+# Recognized shapes:
+#   agent_NN_<label>_merged.json
+#   agent_agent_NN_<label>_merged.json
+#   agent_NN_W##_<label>_merged.json          (W## index prefix)
+#   agent_agent_NN_W##_<label>_merged.json
+# Where <label> matches a half + minute range produced by Step 1c:
+#   "1H_00-05min" / "2H_85-90min" / "ET1_00-05min" / etc.
+_WINDOW_LABEL_RE = re.compile(
+    r'(?:^|_)(?:W\d+_)?'                          # optional W## prefix
+    r'((?:\d+H|ET\d)_\d+-\d+min)'                 # capture the label
+    r'_merged\.json$'
+)
+
+
+def derive_window_label(merged_path: str) -> str:
+    """Recover the canonical window label (e.g. '1H_00-05min') from a
+    merged-file path.
+
+    Bug A context: the structural agent does not emit a top-level
+    `window` field, so merge_utils historically wrote `"window": null`
+    into the merged file. Any reader that trusted that field saw None.
+    Every merged file's BASENAME does carry the window label (it's
+    embedded by the runner when the file is written), so the canonical
+    way to recover it is to parse the basename — not to read the merged
+    file's top-level field.
+
+    Returns the label on match, or the basename stripped of the
+    `agent_(agent_)?ID_` prefix and `_merged.json` suffix as a last
+    resort. Never returns None — readers that expect a non-null string
+    can rely on this contract."""
+    bn = os.path.basename(merged_path)
+    m = _WINDOW_LABEL_RE.search(bn)
+    if m:
+        return m.group(1)
+    # Fallback: strip the prefix and suffix; return whatever remains.
+    bn = re.sub(r'^agent_(?:agent_)?[^_]+_', '', bn)
+    bn = re.sub(r'_merged\.json$', '', bn)
+    return bn or "unknown"
 
 
 def find_agent_output(logs_dir: str, window_id, suffix: str):

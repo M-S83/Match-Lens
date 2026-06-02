@@ -25,6 +25,7 @@ import sys
 import glob
 from datetime import datetime
 from pipeline_accessors import get_marking, get_match_id
+from pipeline_paths import derive_window_label
 from pipeline_schemas import stamp_schema_version
 
 
@@ -94,10 +95,26 @@ def accumulate_pass_sequences(merged_path: str,
     if not new_sequences:
         return 0
 
-    # Tag each sequence with its window
-    window_label = window.get("window", "unknown")
+    # Bug A fix: derive window label from the merged FILENAME rather
+    # than trusting `window["window"]` (the top-level field in the
+    # merged JSON).
+    #
+    # Why the previous code was silently broken:
+    #   1. The structural agent's output schema (STRUCTURAL_OUTPUT_SCHEMA
+    #      in pipeline_runner_v2.py) does not include a top-level
+    #      `window` field, so the agent never writes one.
+    #   2. merge_utils.py:360 sets the merged file's `window` from
+    #      `a.get("window")`, which is therefore None.
+    #   3. `window.get("window", "unknown")` then returns None (not
+    #      "unknown") because dict.get's default only kicks in when
+    #      the key is MISSING — here the key exists with value None.
+    #   4. `seq.setdefault("window", window_label)` was a no-op for any
+    #      sequence the agent had already tagged with None.
+    # Net effect across every match: 100% of sequences ended up tagged
+    # `None` or `"unknown"`, breaking all window-conditioned analysis.
+    window_label = derive_window_label(merged_path)
     for seq in new_sequences:
-        seq.setdefault("window", window_label)
+        seq["window"] = window_label  # unconditional — overwrites None
 
     if os.path.exists(pass_sequences_path):
         with open(pass_sequences_path, encoding="utf-8") as f:

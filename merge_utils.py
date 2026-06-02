@@ -26,7 +26,10 @@ import os
 import re as _re
 import sys
 import glob
-from pipeline_paths import find_agent_output as _find_agent_file
+from pipeline_paths import (
+    find_agent_output as _find_agent_file,
+    derive_window_label as _derive_window_label,
+)
 from pipeline_accessors import (
     get_source_limitations_note,
     get_formation_home,
@@ -162,6 +165,11 @@ def merge_single_agent(a_path: str, out_path: str,
     a["agent_id"]     = agent_id          # ensure accumulator window_id resolves
     a["merge_type"]   = "single_agent"
     a["merged_at"]    = datetime.now().isoformat()
+    # Bug A fix (defence-in-depth, single-agent variant): the structural
+    # agent does not emit a window field, so without this assignment the
+    # single-agent merged file inherits no `window` and any downstream
+    # reader hits the same None-propagation pattern dual_agent had.
+    a["window"]       = _derive_window_label(out_path)
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(stamp_schema_version(a, "agent_merged"), f, indent=2)
@@ -355,9 +363,15 @@ def merge_dual_agents(a_path: str, b_path: str, out_path: str,
             merged_shots.append(shot)
 
     # -- Build merged output ---------------------------------------------------
+    # Bug A fix (defence-in-depth): set the top-level `window` from the
+    # output filename rather than `a.get("window")`. Structural agents
+    # do not emit a window field, so the previous code always wrote None
+    # and propagated that to every downstream reader. derive_window_label
+    # parses the canonical label out of the basename and never returns
+    # None.
     merged = {
         "agent_id":         agent_id,
-        "window":           a.get("window"),
+        "window":           _derive_window_label(out_path),
         "merge_type":       "dual_agent",
         "frames_reviewed":  max(a.get("frames_reviewed", 0), b.get("frames_reviewed", 0)),
         "review_required":  review_required,
