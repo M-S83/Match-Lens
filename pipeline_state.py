@@ -43,6 +43,10 @@ WINDOW_STEPS  = ["3a", "3b", "3d_event", "3d_setpiece", "3d_recovery", "3e_merge
 PIPELINE_STEPS = [
     "2b_jersey_ocr",
     "3c_triage", "3d_reruns", "3e_merge",
+    # v3 port Step 4: zone-normalisation walker runs after the merge
+    # step has written *_merged.json files and before pass-sequence
+    # accumulation reads them.
+    "3e_zone_normalise",
     "3f_shots", "3f_sequences", "3g_summary",
     "3h_ground_truth", "3i_escalation",
     # v3 port Step 1: 3i_player_escalation is the player-side sibling

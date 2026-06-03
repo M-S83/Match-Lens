@@ -1881,6 +1881,15 @@ def run_pipeline(match_dir: str, quality: str = "standard",
 
     _run_python_steps([
         ("3e_merge",        "merge_utils",       "merge_all_windows"),
+        # v3 port Step 4: normalise zone objects across merged windows
+        # (pass_sequences, individual_observations, duels, findings)
+        # and derive vertical_progression for each pass_sequence. Walker
+        # is idempotent and source_profile-aware. NOTE: the structural
+        # agent currently emits start_zone/end_zone strings rather than
+        # zone_start/zone_end dicts -- the walker handles that defensively
+        # (vertical_progression resolves to "unknown" rather than crashing)
+        # and will populate real values once the upstream schema is fixed.
+        ("3e_zone_normalise", "zone_helpers",   "walk_findings_apply_zone_helpers"),
         ("3f_shots",        "accumulator",        "build_shots_log"),
         ("3f_sequences",    "accumulator",        "accumulate_all_windows"),
         ("3h_ground_truth", "ground_truth",       "build_ground_truth_check"),
