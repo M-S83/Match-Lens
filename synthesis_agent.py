@@ -186,6 +186,34 @@ Apply these thresholds strictly:
 - run_type_confidence: "insufficient" (1-2) -> do not report as a
   pattern. Individual note only if highly significant.
 
+BETWEEN-LINES RECEIVING (Fix 56): If a player entry includes
+dominant_between_lines with between_lines_confidence "consistent"
+or "tendency", surface that pattern alongside run_type in the
+profile. Apply the SAME thresholds as run_type.
+
+  dominant_between_lines vocabulary -> rendered phrase:
+    "between_def_mid" -> "between the defensive and midfield lines"
+    "between_mid_fwd" -> "between the midfield and forward lines"
+    "between_fb_cb"   -> "between the fullback and centre-back"
+
+  between_lines_confidence "consistent" -> [A]:
+    "Musiala consistently received between the defensive and
+     midfield lines [A]"
+  between_lines_confidence "tendency"   -> [B]:
+    "Musiala frequently dropped between the midfield and forward
+     lines [B]"
+  between_lines_confidence "insufficient" -> do not report as a
+  pattern.
+
+If dominant_between_lines is null or the field is absent, do not
+fabricate a between-lines pattern -- some source-and-window
+combinations (tactical wide static at maximum distance, narrow
+ball-follow when defensive lines are out of frame) cannot resolve
+between-lines reads reliably, and the field will simply be missing
+for those windows. Reporting "no clear between-lines pattern" is
+itself a fabrication when the field is absent; just omit the clause
+entirely.
+
 ACCUMULATOR AUTHORITY (Fix 54): The accumulator's confidence
 classification is the authoritative source for evidence grading
 in tendency statements. Do not downgrade based on observation text.
