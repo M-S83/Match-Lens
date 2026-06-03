@@ -39,7 +39,15 @@ from pipeline_schemas import stamp_schema_version
 
 STATE_FILE = "pipeline_state.json"
 
-WINDOW_STEPS  = ["3a", "3b", "3d_event", "3d_setpiece", "3d_recovery", "3e_merge"]
+WINDOW_STEPS  = [
+    "3a", "3b", "3d_event", "3d_setpiece", "3d_recovery", "3e_merge",
+    # v3 port Step 14: player-action confirmation batch step. Tracked
+    # per-window (each accepted player_escalation_queue item carries
+    # source_window) so collect_results can update the right window
+    # entry. Step 1 (commit d0a2414) deferred this WINDOW_STEPS
+    # addition until the actual Phase 3b-player block landed.
+    "3i_player_action",
+]
 PIPELINE_STEPS = [
     "2b_jersey_ocr",
     "3c_triage", "3d_reruns", "3e_merge",

@@ -1542,6 +1542,106 @@ Follow the Step 3d Event Agent schema from SKILL.md.
 """
 
 
+def build_player_action_confirmation_prompt(match_dir: str,
+                                              queue_item: dict,
+                                              mc: dict,
+                                              source_profile: dict,
+                                              frame_paths: list) -> str:
+    """Build the Step 3i player-action confirmation prompt for one queued item.
+
+    v3 port Step 14. Loads prompts/05_player_action_confirmation.md as a
+    template and substitutes placeholders with queue_item + mc +
+    source_profile + frame_paths data. The prompt file owns the
+    WHAT-TO-ANSWER branches per action_category, the OUTPUT FORMAT
+    schema, and the inconclusive-rule -- this helper only fills in
+    the match-specific blanks.
+
+    queue_item:      one entry from player_escalation_queue.json's
+                     accepted[] array. Has player, action_category,
+                     timestamp, rerun_window_start/end,
+                     escalation_target_fps, reason, source_window.
+    mc:              match_config dict (home/away/focus team, kits).
+    source_profile:  source_profile.json dict (source_type goes into
+                     the prompt's source-aware framing).
+    frame_paths:     burst frames already extracted by extract_segment.
+                     File basenames are listed in the prompt so the
+                     agent knows which images correspond to which moment.
+    """
+    prompt_path = os.path.join(
+        os.path.dirname(__file__), "..", "prompts",
+        "05_player_action_confirmation.md"
+    )
+    with open(prompt_path, encoding="utf-8") as _pf:
+        template = _pf.read()
+
+    # Team / kit framing. mc.focus_team is optional (production
+    # extract_match_details removed it at Fix 33b); fall back to home.
+    kits      = _kits(mc)
+    home_team = mc.get("home_team", "Home")
+    away_team = mc.get("away_team", "Away")
+    home_kit  = kits.get("home",  "?")
+    away_kit  = kits.get("away",  "?")
+    focus_team = mc.get("focus_team") or home_team
+    if focus_team == home_team:
+        focus_kit, opp_team, opp_kit = home_kit, away_team, away_kit
+    else:
+        focus_kit, opp_team, opp_kit = away_kit, home_team, home_kit
+
+    source_type = source_profile.get("source_type", "unknown")
+    match_label = mc.get("match") or f"{home_team} vs {away_team}"
+
+    # Frame filenames -- list one per line so the agent can match
+    # observations to frames if needed.
+    frame_list = "\n".join(f"  - {os.path.basename(p)}" for p in frame_paths)
+
+    # Action category block in the template spans 2 lines; replace
+    # the whole multi-line placeholder with just the actual value.
+    action_cat_placeholder = (
+        "[ACTION_CATEGORY -- one of: receiving_orientation, pre_receive_scan,\n"
+        "                  first_touch_direction, foot_used, aerial_duel_contact]"
+    )
+
+    # Simple single-token substitutions first.
+    out = template
+    out = out.replace("[ESCALATION_TARGET_FPS]",
+                       str(queue_item.get("escalation_target_fps", 3)))
+    out = out.replace("[SOURCE_TYPE from source_profile.json]", source_type)
+    out = out.replace("[PLAYER_FROM_QUEUE]", queue_item.get("player", "?"))
+    out = out.replace(action_cat_placeholder,
+                       queue_item.get("action_category", "?"))
+    # The prompt also has a bare [ACTION_CATEGORY] in the OUTPUT FORMAT
+    # block ("action_category": "[ACTION_CATEGORY]"). Replace that too.
+    out = out.replace("[ACTION_CATEGORY]",
+                       queue_item.get("action_category", "?"))
+    out = out.replace("[TIMESTAMP]",          queue_item.get("timestamp", "?"))
+    out = out.replace("[RERUN_WINDOW_START]", queue_item.get("rerun_window_start", "?"))
+    out = out.replace("[RERUN_WINDOW_END]",   queue_item.get("rerun_window_end", "?"))
+    out = out.replace("[REASON FROM player_escalation_queue]",
+                       queue_item.get("reason", "?"))
+
+    # The MATCH/FOCUS_TEAM/OPPONENT/COLOUR line has [COLOUR] twice with
+    # different values -- replace the whole line in one shot rather
+    # than risk a str.replace double-hit.
+    match_line_template = (
+        "[MATCH]: [FOCUS_TEAM] in [COLOUR], [OPPONENT] in [COLOUR]."
+    )
+    match_line_value = (
+        f"{match_label}: {focus_team} in {focus_kit}, "
+        f"{opp_team} in {opp_kit}."
+    )
+    out = out.replace(match_line_template, match_line_value)
+
+    # Frame list block. The template line ends with the placeholder,
+    # so substitution lands cleanly without needing to consume a
+    # trailing newline.
+    out = out.replace(
+        "View frames in order: [LIST FRAME FILENAMES from rerun window]",
+        f"View frames in order ({len(frame_paths)} frames):\n{frame_list}"
+    )
+
+    return out
+
+
 def build_setpiece_prompt(match_dir: str, queue_item: dict,
                            mc: dict, set_piece_record: dict,
                            state: dict) -> str:
@@ -2183,6 +2283,180 @@ def run_pipeline(match_dir: str, quality: str = "standard",
         print(f"\n  PHASE 3b: Skipped (frame_extraction unavailable: {_ie})")
     except Exception as _e:
         print(f"\n  PHASE 3b: Error — {_e} (non-blocking, continuing)")
+
+    # ── PHASE 3b-player: Player-action confirmation bursts ──────────────────
+    # v3 port Step 14. Mirrors the set-piece phase structurally:
+    #   1. Read player_escalation_queue.json (Step 10 step-3i output).
+    #   2. For each accepted item, extract a short burst via
+    #      frame_extraction.extract_segment at the item's
+    #      escalation_target_fps (router default: 3fps for receiving/
+    #      pre-receive/foot, 5fps for first_touch/aerial).
+    #   3. Build the confirmation prompt via
+    #      build_player_action_confirmation_prompt (template-driven from
+    #      prompts/05_player_action_confirmation.md).
+    #   4. Submit as a 3i_player_action batch via batch_runner.
+    #   5. For each successful confirmation, call
+    #      player_escalation_router.merge_player_confirmation_into_window
+    #      to set evidence_tier="escalated_confirmation" on the matching
+    #      individual_observation in the source merged window file.
+    #
+    # Item count is capped at 5 by the router (separate from the main
+    # 10-item confirmation_queue cap). The cap means the per-match
+    # additional cost is bounded -- ~$0.05-0.10 at v3 launch typical
+    # corpus.
+    try:
+        from frame_extraction import (
+            find_source_video, extract_segment,
+            timestamp_to_seconds as _fe_ts2s,
+        )
+        from batch_runner import build_request as _build_req
+        from player_escalation_router import (
+            merge_player_confirmation_into_window as _pa_merge
+        )
+
+        _peq_path = os.path.join(match_dir, "player_escalation_queue.json")
+        if os.path.exists(_peq_path):
+            with open(_peq_path, encoding="utf-8") as _pf:
+                _peq = json.load(_pf)
+            _pa_items = (
+                _peq.get("accepted", []) if isinstance(_peq, dict) else []
+            )
+
+            if _pa_items:
+                print(f"\n  PHASE 3b-player: Step 3i_player_action "
+                      f"({len(_pa_items)} items)")
+
+                _pa_video_path = find_source_video(match_dir)
+                _pa_burst_root = os.path.join(match_dir, "frames_burst")
+                os.makedirs(_pa_burst_root, exist_ok=True)
+
+                _pa_source_profile = _load_source_profile(match_dir)
+
+                _pa_requests = []
+                _pa_skipped  = []
+                _pa_burst_id_to_item = {}  # for write-back after collect
+
+                for _pa_item in _pa_items:
+                    _pa_anchor_ts  = _pa_item.get("timestamp")
+                    _pa_window_id  = _pa_item.get("source_window", "")
+                    _pa_target_fps = _pa_item.get("escalation_target_fps", 3)
+                    _pa_start_ts   = _pa_item.get("rerun_window_start", "")
+                    _pa_end_ts     = _pa_item.get("rerun_window_end", "")
+
+                    # Padding = half the rerun-window width. Router
+                    # default per category is timestamp +/- 2s (4-second
+                    # window total); some items may have wider windows
+                    # if the agent specified them.
+                    if _pa_start_ts and _pa_end_ts:
+                        _pa_padding = (
+                            _fe_ts2s(_pa_end_ts) - _fe_ts2s(_pa_start_ts)
+                        ) / 2.0
+                    else:
+                        _pa_padding = 2.0
+                    if _pa_padding <= 0:
+                        _pa_padding = 2.0
+
+                    _pa_anchor_dir = os.path.join(
+                        _pa_burst_root, f"pa_{_pa_window_id}_{_pa_anchor_ts}"
+                    )
+                    try:
+                        _pa_frames = extract_segment(
+                            video_path     = _pa_video_path,
+                            anchor_seconds = _fe_ts2s(_pa_anchor_ts),
+                            out_dir        = _pa_anchor_dir,
+                            target_fps     = _pa_target_fps,
+                            padding_s      = _pa_padding,
+                        )
+                    except Exception as _pa_ee:
+                        _pa_skipped.append(
+                            (_pa_anchor_ts, f"extract_error: {_pa_ee}")
+                        )
+                        continue
+
+                    if not _pa_frames:
+                        _pa_skipped.append(
+                            (_pa_anchor_ts, "no_frames_extracted")
+                        )
+                        continue
+
+                    _pa_prompt = build_player_action_confirmation_prompt(
+                        match_dir, _pa_item, mc,
+                        _pa_source_profile, _pa_frames
+                    )
+                    _pa_burst_id = f"pa_{_pa_window_id}_{_pa_anchor_ts}"
+                    _pa_requests.append(_build_req(
+                        _pa_burst_id,
+                        _pa_prompt,
+                        _prepare_frames(_pa_frames, resize_w, resize_h),
+                        "3i_player_action",
+                    ))
+                    _pa_burst_id_to_item[_pa_burst_id] = _pa_item
+
+                if _pa_skipped:
+                    print(f"  [INFO] Skipped {len(_pa_skipped)} player-action "
+                          f"burst(s):")
+                    for _ts, _reason in _pa_skipped:
+                        print(f"    {_ts}: {_reason}")
+
+                if _pa_requests:
+                    _pa_batch_id = with_retry(lambda: submit_batch(
+                        match_dir, state, _pa_requests, "3i_player_action"
+                    ))
+                    # Persist for resume.
+                    state.setdefault("batch_ids", {})
+                    state["batch_ids"]["3i_player_action_batch_id"] = _pa_batch_id
+                    poll_batch(_pa_batch_id)
+                    collect_results(_pa_batch_id, match_dir, state,
+                                     "3i_player_action")
+
+                    # Merge each confirmation back into the matching
+                    # merged window. merge_player_confirmation_into_window
+                    # returns True iff it found a matching observation
+                    # AND the confirmation status was "confirmed".
+                    _pa_logs_dir = os.path.join(match_dir, "agent_logs")
+                    _pa_merged_count = 0
+                    _pa_unmatched    = 0
+                    _pa_errors       = 0
+                    for _bid, _item in _pa_burst_id_to_item.items():
+                        _resp_path = find_agent_output(
+                            _pa_logs_dir, _bid, "3i_player_action"
+                        )
+                        if _resp_path is None:
+                            _pa_unmatched += 1
+                            print(f"  [WARN] No response file for {_bid}")
+                            continue
+                        try:
+                            with open(_resp_path, encoding="utf-8") as _rf:
+                                _confirmation = json.load(_rf)
+                            if _pa_merge(match_dir, _confirmation):
+                                _pa_merged_count += 1
+                                print(f"  [OK]   {_bid}: confirmation merged "
+                                      f"(evidence_tier=escalated_confirmation)")
+                            else:
+                                _pa_unmatched += 1
+                                _status = _confirmation.get("status", "?")
+                                print(f"  [SKIP] {_bid}: writeback returned "
+                                      f"False (status={_status}, or no "
+                                      f"matching observation in merged window)")
+                        except Exception as _me:
+                            _pa_errors += 1
+                            print(f"  [WARN] merge error for {_bid}: {_me}")
+
+                    print(f"  PHASE 3b-player: {_pa_merged_count} confirmed, "
+                          f"{_pa_unmatched} unmatched/inconclusive, "
+                          f"{_pa_errors} errors")
+            else:
+                print(f"\n  PHASE 3b-player: No accepted player-action items "
+                      f"(skipping)")
+        else:
+            print(f"\n  PHASE 3b-player: No player_escalation_queue.json "
+                  f"found (skipping)")
+
+    except ImportError as _pa_ie:
+        print(f"\n  PHASE 3b-player: Skipped (module unavailable: {_pa_ie})")
+    except Exception as _pa_e:
+        print(f"\n  PHASE 3b-player: Error — {_pa_e} "
+              f"(non-blocking, continuing)")
 
     _run_python_steps([
         ("3j_readiness",    "build_readiness_check",  "build_readiness_check"),

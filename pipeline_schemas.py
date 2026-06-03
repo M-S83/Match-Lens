@@ -62,6 +62,11 @@ SCHEMA_VERSIONS = {
     "agent_player": "1.0",
     "agent_event": "1.0",
     "agent_setpiece": "1.0",
+    # v3 port Step 14: schema-version stamp for the player-action
+    # confirmation agent responses (Phase 3b-player block in
+    # pipeline_runner_v2.py). collect_results stamps the saved
+    # response file as agent_3i_player_action via this name.
+    "agent_3i_player_action": "1.0",
     "agent_merged": "1.0",
     "running_summary": "1.0",
     "pass_sequences": "1.0",
