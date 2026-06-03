@@ -44,11 +44,27 @@ PIPELINE_STEPS = [
     "2b_jersey_ocr",
     "3c_triage", "3d_reruns", "3e_merge",
     "3f_shots", "3f_sequences", "3g_summary",
-    "3h_ground_truth", "3i_escalation", "3j_readiness",
-    "3k_metrics", "3l_synthesis",
+    "3h_ground_truth", "3i_escalation",
+    # v3 port Step 1: 3i_player_escalation is the player-side sibling
+    # of 3i_escalation. Reads merged windows for player-observation
+    # uncertainty and queues focused confirmation passes. Output:
+    # player_escalation_queue.json (separate from confirmation_queue.json).
+    "3i_player_escalation",
+    "3j_readiness",
+    "3k_metrics",
+    # v3 port Step 1: 3k2_player_cards is the player-side aggregator
+    # that runs after deep skill metrics, before synthesis. Reads
+    # running_summary + match_config + source_profile; writes
+    # player_summary_cards.json.
+    "3k2_player_cards",
+    "3l_synthesis",
     "4a_tactical_report", "4b_opposition_report",
     "4c_flagged_moments", "4d_pass_network",
 ]
+# Note: 3i_player_action (per-window) is intentionally NOT added to
+# WINDOW_STEPS at this time. The player-action confirmation loop is
+# Step 14 of the v3 porting sequence; the WINDOW_STEPS entry is added
+# in that step, not here, to keep this state-machine change minimal.
 
 
 def load_state(match_dir: str) -> dict:
