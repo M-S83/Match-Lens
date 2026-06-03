@@ -75,6 +75,11 @@ from pipeline_state  import (init_state, load_state, mark_window, mark_step,
                                is_window_done, is_step_done, pending_windows,
                                failed_windows, print_progress, PIPELINE_STEPS)
 from batch_runner    import submit_batch, poll_batch, collect_results, with_retry
+# v3 port Step 11: live consumers of three v3 reference modules
+# (visibility_minimums, watch_list_aggregator). pitch_validation and the
+# other reference modules already activated at earlier steps.
+from visibility_minimums    import compute_minimums as _v3_compute_minimums
+from watch_list_aggregator  import inject_watch_list_into_prompt as _v3_inject_watch_list
 # Fix 42: surface the API model string into pipeline state and the report manifest.
 from batch_runner    import MODEL as API_MODEL
 from cost_estimator  import load_match_data, calculate_cost, print_estimate
@@ -1055,13 +1060,26 @@ cannot see the ball."
 
 
 def build_player_prompt(match_dir: str, window: dict, mc: dict,
-                         structural_context=None) -> str:
+                         structural_context=None,
+                         prior_top_obs=None) -> str:
     """
     Build the Step 3b player agent prompt.
 
     Fix 33a (A+B2): the 4th arg is now the 3a structural output dict for THIS
     window (not a free-text prior summary). Replaces the SKILL.md-mandated
     STRUCTURAL CONTEXT block that was previously absent.
+
+    v3 port Step 11: added prior_top_obs parameter and three injection
+    points (WATCH LIST FROM PRIOR INTELLIGENCE, PRIOR WINDOW PLAYER
+    SUMMARY, source-scaled MINIMUM REQUIREMENTS via the v3
+    visibility_minimums module). The prior_top_obs parameter is
+    architecturally in place for v3.1 cross-window-context two-pass
+    batching (TODO_v3_housekeeping.md "v3.1 cross-window observation
+    continuity"); at v3 launch the caller always passes None and the
+    PRIOR WINDOW block prints the v3.1-deferred message. The prompt's
+    OUTPUT FORMAT block requests top_observations_for_next_window as
+    a forward-compat field so v3.1 only needs to add the threading
+    layer, not change the agent prompt.
     """
     if structural_context is None:
         structural_context = {}
@@ -1190,6 +1208,44 @@ But prefer the canonical terms above whenever they apply —
 they enable pattern aggregation across the whole match.
 """
 
+    # v3 port Step 11: build the WATCH LIST FROM PRIOR INTELLIGENCE
+    # block. Delegates to watch_list_aggregator (the v3 module is now
+    # a live runtime consumer). On matches with an empty watch_list
+    # (the current corpus state -- Step 2 seeded match_config.watch_list
+    # as []), the helper returns "Watch list empty for this match."
+    watch_list_text = _v3_inject_watch_list(mc)
+    watch_list_block = f"""=== WATCH LIST FROM PRIOR INTELLIGENCE ===
+Items the operator (or prior matches' confirmation work) has flagged
+for this match. For each item, watch for the behaviour described and
+log any observations under that watch_list_id in your output's
+watch_list_confirmations field.
+
+{watch_list_text}
+"""
+
+    # v3 port Step 11 (option (a) for v3 launch -- see Task 77 / Risk 1
+    # decision and TODO_v3_housekeeping.md "v3.1 cross-window observation
+    # continuity"): the prior_top_obs parameter exists in the signature
+    # for v3.1 forward-compatibility. At v3 launch the caller always
+    # passes None and we print the deferral message. The block is in
+    # place structurally so v3.1's two-pass batching implementation
+    # only changes the content, not the prompt structure.
+    if prior_top_obs:
+        prior_window_block = f"""=== PRIOR WINDOW PLAYER SUMMARY ===
+Top observations carried forward from the prior window. Use these to
+verify or refute patterns -- if you see a confirming observation in
+this window, mark it as such. If you see a contradicting observation,
+note that explicitly.
+
+{prior_top_obs}
+"""
+    else:
+        prior_window_block = """=== PRIOR WINDOW PLAYER SUMMARY ===
+No prior window -- cross-window continuity will be added in v3.1
+(see TODO_v3_housekeeping.md "v3.1 cross-window observation
+continuity"). For this run, treat each window as independent.
+"""
+
     return f"""You are a football player analyst. Review the same frames as the structural agent.
 Your ONLY task is individual player observations, duels, and physical profiles.
 Do NOT re-read formation, sequences, or pressing scores.
@@ -1203,7 +1259,9 @@ WINDOW:    {window_id}
 {source_block}
 
 {structural_block}
+{prior_window_block}
 {roster_block}{ocr_block}
+{watch_list_block}
 {action_vocab_block}
 {_player_minimums_block(source_profile)}
 
@@ -1258,7 +1316,32 @@ Return ONLY raw JSON. No prose. No preamble. No markdown fences.
   "player_agent": true,
   "window": "{window_id}",
   "individual_observations": [ ...entries per the schema above... ],
-  "duels": [ ...entries per the duel schema above... ]
+  "duels": [ ...entries per the duel schema above... ],
+  "watch_list_confirmations": [
+    {{
+      "watch_list_id":   "<id from the WATCH LIST block above>",
+      "status":          "confirmed | refuted | not_observed_this_window",
+      "notes":           "what you saw that supports the verdict"
+    }}
+    /* empty array if the WATCH LIST block was empty for this match */
+  ],
+  "top_observations_for_next_window": [
+    /* 3-5 short observations from this window worth carrying into
+       the NEXT window's analysis -- pattern starts, role changes,
+       partnerships forming, momentum shifts. Each entry: 1-2 lines.
+       v3 launch: this field is emitted but no consumer threads it
+       forward yet (single-pass batching). v3.1 will activate the
+       cross-window threading -- the prompt format is forward-compat
+       so no agent-prompt change is required at that point. See
+       TODO_v3_housekeeping.md "v3.1 cross-window observation
+       continuity". For now: emit the field with your best 3-5
+       observations; downstream code stores them but doesn't yet
+       feed them back. */
+    {{
+      "player":      "name (#N) or position",
+      "observation": "brief pattern statement worth verifying next window"
+    }}
+  ]
 }}
 """
 
@@ -1266,26 +1349,22 @@ Return ONLY raw JSON. No prose. No preamble. No markdown fences.
 def _player_minimums_block(source_profile: dict) -> str:
     """Source-scaled MINIMUM REQUIREMENTS block per SKILL.md Step 3b.
 
-    Scales observation counts by source_profile.visibility_scores
-    .off_ball_coverage_score so that low-coverage sources (ball-follow
-    footage where the camera rarely shows off-ball player behaviour)
-    don't get held to minimums they cannot meet. High-coverage
-    tactical-wide footage gets the full minimums.
+    Delegates the per-tier numeric lookup to visibility_minimums
+    .compute_minimums(). Activates the v3 module as a live runtime
+    consumer (per V3_PORTING_PLAN.md Section 8 Step 11) -- pre-Step-11,
+    this function carried the tier table inline; post-Step-11 the table
+    lives canonically in visibility_minimums and this function only
+    formats the result into prompt text.
 
-    Tiers match visibility_minimums.compute_minimums().
-    """
-    coverage = (
-        (source_profile or {})
-        .get("visibility_scores", {})
-        .get("off_ball_coverage_score", 0.7)  # default to high if unknown
-    )
-
-    if coverage >= 0.7:
-        tier, total, opp, gk = "high",    5, 2, "1 every 3 windows"
-    elif coverage >= 0.4:
-        tier, total, opp, gk = "partial", 4, 1, "1 every 5 windows"
-    else:
-        tier, total, opp, gk = "low",     3, 1, "not enforced -- source limit"
+    The output text is unchanged vs the pre-Step-11 inline version --
+    the v3 module's tier definitions match exactly what was inlined
+    here, so this refactor produces byte-identical prompt output."""
+    mins = _v3_compute_minimums(source_profile or {})
+    coverage = mins["off_ball_coverage_score"]
+    tier     = mins["tier"]
+    total    = mins["total_min"]
+    opp      = mins["opposition_min"]
+    gk       = mins["gk_frequency"]
 
     return f"""=== MINIMUM REQUIREMENTS (source-scaled) ===
 Source off_ball_coverage_score: {coverage:.2f}  -->  {tier} coverage tier.
@@ -1710,7 +1789,16 @@ def run_pipeline(match_dir: str, quality: str = "standard",
                 except Exception:
                     pass
 
-            prompt  = build_player_prompt(match_dir, win, mc, structural_context)
+            # v3 port Step 11 (option (a) for v3 launch): prior_top_obs=None
+            # explicitly. PHASE 2 batches all windows in parallel, so prior-
+            # window state can't be coherently threaded without restructuring
+            # into option (d) two-pass batching. The architectural decision
+            # (Task 77) is to ship v3 with single-pass batching and add the
+            # second pass as v3.1. See TODO_v3_housekeeping.md "v3.1
+            # cross-window observation continuity".
+            prompt  = build_player_prompt(match_dir, win, mc,
+                                          structural_context,
+                                          prior_top_obs=None)
 
             from batch_runner import build_request
             requests.append(build_request(wid, prompt,
