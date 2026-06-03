@@ -962,6 +962,36 @@ the window's notes field.
 Log EVERY distinct possession sequence in the window, for BOTH teams.
 Tag each: "team": "home_kit" or "team": "away_kit"
 
+SCALE ANCHOR (read this before logging anything): a five-minute
+window of open play produces 15-30 distinct possession sequences
+when home and away are combined. That is roughly 3-6 sequences per
+minute of play. The default failure mode of 1fps tactical analysis
+is to log a small number of high-confidence sequences and miss the
+small, unremarkable recycling sequences that make up the bulk of
+any match. Open-play sequences that did not progress are still
+sequences. Goal kicks distributed short are still sequences. A
+throw-in followed by two passes back to a CB is still a sequence.
+
+Before finalising your output, COUNT your pass_sequences array:
+  - 15-30 total: normal range, ship it
+  - 10-14: borderline — was there an unusual stoppage in this window?
+           if not, you're missing routine sequences; review again
+  - <10:   you have missed sequences. This is a known failure mode of
+           1fps tactical analysis on conservative-trained models. Scan
+           the frames a second time looking specifically for: short
+           throw-in restarts, goal kicks distributed short, midfield
+           recycling between CBs and the DM, and back-passes from
+           wide players to inside midfielders. These routine sequences
+           do not feel notable but they are sequences and must be logged.
+           Also: one-touch passes that lose possession ("attempted pass
+           under pressure, intercepted") still count as sequences. The
+           chain is short ([#N] ->F [#N opposition recovery]) but the
+           possession attempt happened and should be logged.
+
+Windows with long stoppages (lengthy injuries, VAR checks, multiple
+substitutions) legitimately produce fewer sequences — use honest
+judgement, not quota-hitting.
+
 A possession sequence is any chain of TWO OR MORE consecutive passes
 by the same team (or one pass that leads directly to a shot, cross,
 or set piece). A sequence STARTS at:
@@ -1017,21 +1047,6 @@ the match.
 ONLY skip a sequence entirely when you cannot identify EITHER endpoint
 player. That is the floor: "I cannot tell who had the ball" — not "I
 cannot see the ball."
-
-EXHAUSTIVENESS CHECK: a five-minute window of open play typically
-contains 15-30 distinct possession sequences when home and away
-sequences are combined. If your total (home + away) for the window
-falls between 15 and 30, that is normal. If it falls below 15 in a
-window with sustained open play and no major stoppages, you have
-most likely missed routine recycling sequences in midfield - review
-the frames again before finalising.
-
-Open-play sequences that did not progress are still sequences. Goal
-kicks distributed short are still sequences. A throw-in followed by
-two passes back to a CB is still a sequence. Windows with long
-stoppages (lengthy injuries, VAR checks, multiple substitutions)
-legitimately produce fewer sequences - use honest judgement, not
-quota-hitting.
 {zone_encoding_block}
 {FORMATION_RECOGNITION_GUIDE}
 {SET_PIECE_GUIDE}
