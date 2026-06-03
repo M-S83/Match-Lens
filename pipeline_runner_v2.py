@@ -1277,7 +1277,8 @@ Each entry in individual_observations[] MUST carry these fields:
                       aerial_ability / duels / recovery_runs /
                       gk_distribution / gk_positioning / gk_shot_stopping /
                       positional_tendency / receiving_orientation /
-                      pre_receive_scan / first_touch_direction
+                      pre_receive_scan / first_touch_direction /
+                      temperament_observation
   observation         specific description -- what happened, not evaluation
   observation_type    strength / weakness / trait / neutral
   outcome             success / failure / neutral / unclear
@@ -1292,6 +1293,54 @@ Each entry in individual_observations[] MUST carry these fields:
   frames              ["frame_XXmYYs.jpg", ...]
   preferred_foot      right / left / both / unknown   (if observable)
   physical_profile    {{height_impression, pace_impression, build}}  (if observable)
+
+  ─── v3 per-row fields (REQUIRED on every entry; use null when not applicable) ───
+
+  condition                 string OR null. Circumstance under which a
+                            strength/weakness pattern holds (e.g. "when allowed
+                            to turn", "when isolated against a full-back"). ONLY
+                            set when you have ALSO OBSERVED THE CONVERSE -- at
+                            least one instance where the condition was absent
+                            and the pattern broke. If you have not observed the
+                            converse, leave as null. Do not invent conditions.
+
+  condition_absent_outcome  string OR null. What was observed on occasions when
+                            the condition was absent. DESCRIPTIVE not
+                            prescriptive -- describe what was seen, not what
+                            should be done. Must be set if condition is set;
+                            both null otherwise.
+
+  temperament_subcode       string OR null. ONLY set when action_category is
+                            "temperament_observation". One of:
+                              visible_frustration    -- arms-out gestures,
+                                                        head-down body language,
+                                                        kicking ground/net
+                              organising_behaviour   -- pointing, directing
+                                                        teammates, gesturing for
+                                                        position changes
+                              assertiveness_in_duels -- engagement level in
+                                                        physical contests
+                              reaction_after_error   -- behaviour in seconds
+                                                        after a personal error
+                            Confidence ceiling for temperament_observation is
+                            "medium" -- never use "high" for these.
+
+  cross_window_continuation string. ONE OF:
+                              "new"                -- first time observing this
+                              "continues_prior"    -- same pattern as prior window
+                              "extends_prior"      -- builds on/develops prior
+                              "contradicts_prior"  -- breaks/reverses prior
+                            At v3 launch (single-pass batching) almost every
+                            entry will be "new" -- that is correct. The field
+                            is required so v3.1's two-pass batching has a
+                            stable structure to populate.
+
+  link_up_with              array of player strings OR null. Other players
+                            co-occurring in this observation (passing partner,
+                            run sequence, defensive cover). Format same as
+                            `player` field. Used downstream to build the
+                            partnerships card field per
+                            player_summary_cards.json.
 
 === DUEL SCHEMA — REQUIRED FOR EVERY DUEL ENTRY ===
 Each entry in duels[] MUST carry:
@@ -1317,6 +1366,20 @@ Return ONLY raw JSON. No prose. No preamble. No markdown fences.
   "window": "{window_id}",
   "individual_observations": [ ...entries per the schema above... ],
   "duels": [ ...entries per the duel schema above... ],
+  "player_escalation_queue": [
+    {{
+      "player":          "name (#N) or position",
+      "action_category": "<from the categories above>",
+      "timestamp":       "MMmSSs",
+      "priority":        "high | medium | low",
+      "reason":          "what makes this worth escalating -- e.g. confidence is medium and the action is high-impact (a goal-line clearance, a missed sitter); or you saw a partial pattern that needs higher-fps confirmation"
+    }}
+    /* up to ~3 items per window; the router caps at 5 across all
+       windows in a match. Empty array if no observations warrant
+       escalation -- not every window needs entries here. The pipeline
+       step 3i_player_escalation reads this array post-merge and
+       writes player_escalation_queue.json. */
+  ],
   "watch_list_confirmations": [
     {{
       "watch_list_id":   "<id from the WATCH LIST block above>",
