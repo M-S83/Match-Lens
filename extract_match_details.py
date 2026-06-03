@@ -225,6 +225,20 @@ def extract_match_details(match_dir: str, screenshot_path: str) -> dict:
     extracted.setdefault("attack_direction_2h", None)
     extracted.setdefault("enrichment_level",    "full")
     extracted.setdefault("player_id_ceiling",   "confirmed")
+    # v3 port Step 2: seed pitch_dimensions_assumed and watch_list with
+    # safe defaults so downstream v3 readers (pitch_validation,
+    # watch_list_aggregator, build_deep_skill_metrics_v2's metre-based
+    # metric fns) never hit a missing-key path on fresh drafts. The
+    # setdefault pattern preserves any operator-edited values across
+    # re-runs against the same draft. SKILL.md:679-684 documents the
+    # same default shape (executable code in extract_match_details.py
+    # is the source of truth; the SKILL.md block is illustrative).
+    extracted.setdefault("pitch_dimensions_assumed", {
+        "length_m": 105,
+        "width_m":  68,
+        "source":   "default",
+    })
+    extracted.setdefault("watch_list", [])
     extracted["verified"] = False  # always False until human signs off
 
     # Write draft config
