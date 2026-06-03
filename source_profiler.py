@@ -26,6 +26,28 @@ MIN_CONFIDENCE          = 0.6   # below this -> default to unknown
 SAMPLE_INTERVAL_SECONDS = 60    # one frame per minute for classification
 MAX_SAMPLES             = 10    # cap to avoid token overrun
 
+# v3 port Step 3: the full set of required fields in a properly-built
+# source profile. Used by build_source_profile() to validate the LLM
+# classifier's response before writing, and exposed via the
+# validate_source_profile() helper for offline checks (e.g. by
+# pipeline_runner_v2 before v3 metric calculation runs).
+REQUIRED_VISIBILITY_FIELDS = (
+    "full_pitch_visibility_score",
+    "weakside_visibility_score",
+    "off_ball_coverage_score",
+    "camera_motion_score",
+    "zoom_variability_score",
+    "stability_score",
+    "orientation_consistency_score",
+    "occlusion_score",
+    "ball_follow_bias",
+)
+
+REQUIRED_PROFILE_FIELDS = (
+    "source_type",
+    "classification_confidence",
+)
+
 
 VALID_SOURCE_TYPES = [
     "tactical_wide_static",
@@ -210,6 +232,122 @@ def compute_visibility_limitations(gates: dict, visibility_scores: dict) -> list
 
 # -- Main build function -------------------------------------------------------
 
+class SourceProfileError(ValueError):
+    """Raised when source classification output is missing required
+    fields or contains invalid values.
+
+    The fix is to re-run source profiling against the match's sample
+    frames -- do NOT paper over missing fields with source-type
+    defaults. Every downstream consumer of visibility_scores
+    (visibility_minimums.compute_for_match, validate_between_lines,
+    the temperament_observation gate at 0.4, the data-quality section
+    of the report) treats off_ball_coverage_score and friends as
+    per-match signal. Two matches with the same source_type can have
+    materially different visibility -- camera position, weather,
+    crowd density, broadcast quality, whether the operator is
+    following the ball aggressively or holding wide. Source-type
+    averages would silently misclassify edge-case matches (e.g. a
+    tactical_wide_static at maximum zoom where players are tiny
+    dots, or a broadcast_fixed_wide on a dusk/floodlit recording with
+    heavier-than-average occlusion). Strict validation here is what
+    the system was designed for."""
+    pass
+
+
+def validate_source_profile(profile: dict) -> dict:
+    """Inspect a source_profile dict (loaded from disk or freshly
+    built) for completeness against the v3 contract.
+
+    Returns a dict with shape:
+        {
+          "ok":      bool,        -- True iff no issues
+          "issues":  list[str],   -- human-readable descriptions
+          "missing": list[str],   -- dotted field paths that are absent
+          "invalid": list[tuple], -- (field_path, value) for bad values
+        }
+
+    Does NOT raise. Consumers decide how to handle (warn vs block vs
+    prompt for re-classification). build_source_profile() uses this
+    internally but converts a non-ok result into SourceProfileError;
+    offline consumers (e.g. a pre-flight check in pipeline_runner_v2
+    before v3 metric steps) can call it and choose their own response.
+
+    Distinguishes three failure modes for visibility_scores:
+      1. block missing entirely (key absent at top level)
+      2. block present but empty {}
+      3. block present but some required dimensions absent
+    All three produce different `issues` text so the caller knows
+    whether to re-classify from scratch or just patch missing fields."""
+    issues  = []
+    missing = []
+    invalid = []
+
+    for field in REQUIRED_PROFILE_FIELDS:
+        if profile.get(field) is None:
+            missing.append(field)
+            issues.append(f"{field} is missing or null")
+
+    if "visibility_scores" not in profile:
+        # Case 1: block missing entirely
+        missing.append("visibility_scores")
+        issues.append(
+            "visibility_scores key is missing entirely -- profile may be "
+            "hand-curated or pre-date source_profiler.py. Re-run source "
+            "profiling from scratch to acquire real per-match scores."
+        )
+    else:
+        vs = profile["visibility_scores"]
+        if vs is None:
+            missing.append("visibility_scores")
+            issues.append(
+                "visibility_scores is present but null -- treat as missing. "
+                "Re-run source profiling."
+            )
+        elif not isinstance(vs, dict):
+            invalid.append(("visibility_scores", vs))
+            issues.append(
+                f"visibility_scores must be a dict, got {type(vs).__name__}"
+            )
+        elif not vs:
+            # Case 2: present but empty {}
+            for field in REQUIRED_VISIBILITY_FIELDS:
+                missing.append(f"visibility_scores.{field}")
+            issues.append(
+                "visibility_scores is an empty dict -- the classifier "
+                "returned no visibility data. All " +
+                f"{len(REQUIRED_VISIBILITY_FIELDS)} required dimensions "
+                "are absent. Re-run source profiling from scratch."
+            )
+        else:
+            # Case 3: present, non-empty, check each required field
+            field_misses = []
+            for field in REQUIRED_VISIBILITY_FIELDS:
+                if field not in vs:
+                    field_misses.append(field)
+                    missing.append(f"visibility_scores.{field}")
+                else:
+                    v = vs[field]
+                    if not isinstance(v, (int, float)) or not (0.0 <= v <= 1.0):
+                        invalid.append((f"visibility_scores.{field}", v))
+                        issues.append(
+                            f"visibility_scores.{field} must be a float "
+                            f"in [0,1], got {v!r}"
+                        )
+            if field_misses:
+                issues.append(
+                    "visibility_scores is partially populated -- "
+                    f"missing {len(field_misses)} of "
+                    f"{len(REQUIRED_VISIBILITY_FIELDS)} required "
+                    f"dimensions: {field_misses}. The classifier response "
+                    "was incomplete or used an older schema. Re-run "
+                    "source profiling, or hand-patch the missing fields "
+                    "only if there is real per-match data to populate them."
+                )
+
+    return {"ok": not issues, "issues": issues,
+            "missing": missing, "invalid": invalid}
+
+
 def build_source_profile(match_dir: str, classification_result: dict,
                          config_path: str = None) -> bool:
     """
@@ -231,6 +369,28 @@ def build_source_profile(match_dir: str, classification_result: dict,
     split_aware   = classification_result.get("split_aware", False)
     vis_scores    = classification_result.get("visibility_scores", {})
     source_note   = classification_result.get("source_limitations_note", "")
+
+    # v3 port Step 3: strict validation of the classifier response.
+    # Do NOT supply defaults for missing visibility fields. See the
+    # SourceProfileError docstring for the reasoning. Note: validation
+    # runs BEFORE the low-confidence-fallback branch below so that
+    # even a low-confidence classification still has to be COMPLETE.
+    # Low-confidence != malformed response; the two failure modes
+    # need different signals.
+    validation = validate_source_profile({
+        "source_type":              source_type,
+        "classification_confidence": confidence,
+        "visibility_scores":         classification_result.get("visibility_scores"),
+    })
+    if not validation["ok"]:
+        raise SourceProfileError(
+            "Source classification response failed validation:\n  - "
+            + "\n  - ".join(validation["issues"])
+            + "\n\nRe-run source profiling against this match's sample "
+              "frames before proceeding. Do NOT continue with partial "
+              "visibility scores -- downstream metrics treat each "
+              "dimension as per-match signal."
+        )
 
     # Fall back to unknown if confidence is too low
     confident = True
