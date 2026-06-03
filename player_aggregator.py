@@ -180,27 +180,80 @@ def extract_roster(match_config):
     lineups = match_config.get("lineups", []) or []
     subs = match_config.get("substitutions", []) or []
 
+    # v3 port Step 6: production match_config.json uses two shapes for
+    # team and player fields:
+    #
+    #   lineups[i].team         = {"name": "..."}              (dict)
+    #   substitutions[i].team   = "..."                         (string)
+    #   substitutions[i].player_off / player_on = "name string" (NOT
+    #     the dict-with-number 'player' / 'assist' fields the
+    #     football-data.org API uses; the production match_config
+    #     extractor writes string-name fields instead)
+    #
+    # The aggregator was originally built against the football-data.org
+    # API shape. Per Step 6 direction-of-fix rule, patch the v3 reader
+    # to handle what production writes -- both shapes -- rather than
+    # demanding production conform to the reference.
+
+    def _team_name(entity):
+        """Read a team field that may be dict {'name': ...} OR plain string."""
+        if isinstance(entity, dict):
+            return entity.get("name")
+        if isinstance(entity, str):
+            return entity
+        return None
+
+    # Pre-build a name -> (team_side, shirt) index from lineups so we
+    # can resolve string-name substitution entries back to shirt numbers.
+    name_to_key = {}
+    for lineup in lineups:
+        _t_side = _resolve_team_side(_team_name(lineup.get("team")), match_config)
+        if _t_side is None:
+            continue
+        for p_wrap in (lineup.get("startXI", []) or []) + (lineup.get("substitutes", []) or []):
+            p = p_wrap.get("player", {}) if isinstance(p_wrap, dict) and "player" in p_wrap else p_wrap
+            if not isinstance(p, dict):
+                continue
+            _shirt = p.get("number")
+            _name  = p.get("name")
+            if _shirt is not None and _name:
+                name_to_key[_name] = (_t_side, int(_shirt))
+
     # Pre-index substitutions
     sub_on_for = {}   # (team, shirt) -> minute_on
     sub_off_for = {}  # (team, shirt) -> minute_off
     for s in subs:
-        team_name = s.get("team", {}).get("name")
+        team_name = _team_name(s.get("team"))
         team = _resolve_team_side(team_name, match_config)
         minute = s.get("time", {}).get("elapsed")
-        # Player going OFF (the player in 'player' field)
-        if s.get("player"):
-            shirt = s["player"].get("number")
+
+        # Player going OFF -- accept both dict-shape ("player" field)
+        # and string-name shape ("player_off" field).
+        off_entity = s.get("player") if s.get("player") is not None else s.get("player_off")
+        if isinstance(off_entity, dict):
+            shirt = off_entity.get("number")
             if team and shirt is not None:
                 sub_off_for[(team, int(shirt))] = minute
-        # Player coming ON (the player in 'assist' field per the API convention used in the skill)
-        if s.get("assist"):
-            shirt = s["assist"].get("number")
+        elif isinstance(off_entity, str):
+            key = name_to_key.get(off_entity)
+            if key:
+                sub_off_for[key] = minute
+
+        # Player coming ON -- accept both dict-shape ("assist" field)
+        # and string-name shape ("player_on" field).
+        on_entity = s.get("assist") if s.get("assist") is not None else s.get("player_on")
+        if isinstance(on_entity, dict):
+            shirt = on_entity.get("number")
             if team and shirt is not None:
                 sub_on_for[(team, int(shirt))] = minute
+        elif isinstance(on_entity, str):
+            key = name_to_key.get(on_entity)
+            if key:
+                sub_on_for[key] = minute
 
     # Starters
     for lineup in lineups:
-        team_name = lineup.get("team", {}).get("name")
+        team_name = _team_name(lineup.get("team"))
         team = _resolve_team_side(team_name, match_config)
         for p_wrap in lineup.get("startXI", []) or []:
             p = p_wrap.get("player", {}) if "player" in p_wrap else p_wrap
@@ -224,7 +277,7 @@ def extract_roster(match_config):
 
     # Substitutes who came on
     for lineup in lineups:
-        team_name = lineup.get("team", {}).get("name")
+        team_name = _team_name(lineup.get("team"))
         team = _resolve_team_side(team_name, match_config)
         for p_wrap in lineup.get("substitutes", []) or []:
             p = p_wrap.get("player", {}) if "player" in p_wrap else p_wrap
