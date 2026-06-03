@@ -140,6 +140,60 @@ def accumulate_pass_sequences(merged_path: str,
 
 # -- Running summary update ----------------------------------------------------
 
+def _count_vertical_progressions(pass_sequences):
+    """Count vertical_progression values across a window's pass sequences.
+
+    v3 Step 5 helper. Returns a dict keyed by the seven progression
+    categories plus 'unknown'. Until Step 18 lands (structural agent
+    schema emitting zone_start/zone_end as dicts), every sequence
+    resolves to 'unknown' here. After Step 18, real distribution data
+    will populate this. Either way the per-window structure stays
+    consistent so downstream metric code sees the same shape."""
+    counts = {
+        "same_third":                        0,
+        "defending_to_middle":               0,
+        "middle_to_attacking":               0,
+        "defending_to_attacking":            0,
+        "regression_middle_to_defending":    0,
+        "regression_attacking_to_middle":    0,
+        "regression_attacking_to_defending": 0,
+        "unknown":                           0,
+    }
+    for seq in (pass_sequences or []):
+        vp = seq.get("vertical_progression", "unknown")
+        if vp in counts:
+            counts[vp] += 1
+        else:
+            counts["unknown"] += 1
+    return counts
+
+
+def _count_defending_turnovers(pass_sequences):
+    """Returns (turnover_count, sequence_count) for sequences starting
+    in the defending third. Turnover = outcome in {lost_possession,
+    clearance}.
+
+    v3 Step 5 helper. Reads zone_start.vertical_third (dict shape, the
+    v3 contract). Sequences without dict-shaped zone_start
+    (e.g. the current Bayern data where the structural agent still
+    emits start_zone as a string) are skipped -- they contribute zero
+    to both numerator and denominator until Step 18 brings the
+    upstream schema into alignment."""
+    turnover_count = 0
+    sequence_count = 0
+    for seq in (pass_sequences or []):
+        zs = seq.get("zone_start") or {}
+        if not isinstance(zs, dict):
+            continue
+        v_start = zs.get("vertical_third")
+        if v_start == "defending":
+            sequence_count += 1
+            outcome = seq.get("outcome")
+            if outcome in {"lost_possession", "clearance"}:
+                turnover_count += 1
+    return turnover_count, sequence_count
+
+
 def _normalise_trigger(text: str) -> str:
     """Map free-text trigger descriptions to structured codes."""
     t = text.lower()
@@ -305,8 +359,26 @@ def update_running_summary(merged_path: str,
                     "shots_for", "shots_against", "flagged_moments", "key_moments",
                     "individual_observations", "set_pieces", "set_pieces_rejected",
                     "transitions", "gk_kicks",
-                    "duels", "findings", "confirmation_queue", "data_gap_windows"]:
+                    "duels", "findings", "confirmation_queue", "data_gap_windows",
+                    # v3 Step 5 additions (list-shape)
+                    "quiet_windows", "vertical_progression_counts",
+                    "watch_list_confirmations", "between_lines_events",
+                    "fouls_committed", "conditional_pattern_observations",
+                    "temperament_observations"]:
             summary.setdefault(key, [])
+        # v3 Step 5 additions (non-list shape)
+        summary.setdefault("vertical_progression_totals", {
+            "same_third":                        0,
+            "defending_to_middle":               0,
+            "middle_to_attacking":               0,
+            "defending_to_attacking":            0,
+            "regression_middle_to_defending":    0,
+            "regression_attacking_to_middle":    0,
+            "regression_attacking_to_defending": 0,
+            "unknown":                           0,
+        })
+        summary.setdefault("defending_third_turnover_count", 0)
+        summary.setdefault("defending_third_sequence_count", 0)
         summary.setdefault("windows_complete", 0)
         summary.setdefault("match", "")
         summary.setdefault("home_team", "")
@@ -334,6 +406,30 @@ def update_running_summary(merged_path: str,
             "data_gap_windows":       [],
             "findings":               [],
             "confirmation_queue":     [],
+            # v3 Step 5 additions (block 2): new accumulators initialised
+            # alongside existing v2 fields. List-shape accumulators read
+            # from agent output fields that the v3 prompts produce; on
+            # pre-v3 runs they remain empty arrays (the accumulator
+            # initialised them correctly, no agent input fed in).
+            "quiet_windows":                  [],
+            "vertical_progression_counts":    [],
+            "vertical_progression_totals":    {
+                "same_third":                        0,
+                "defending_to_middle":               0,
+                "middle_to_attacking":               0,
+                "defending_to_attacking":            0,
+                "regression_middle_to_defending":    0,
+                "regression_attacking_to_middle":    0,
+                "regression_attacking_to_defending": 0,
+                "unknown":                           0,
+            },
+            "defending_third_turnover_count": 0,
+            "defending_third_sequence_count": 0,
+            "watch_list_confirmations":       [],
+            "between_lines_events":           [],
+            "fouls_committed":                [],
+            "conditional_pattern_observations": [],
+            "temperament_observations":       [],
         }
 
     summary["windows_complete"] += 1
@@ -479,11 +575,26 @@ def update_running_summary(merged_path: str,
         "shifts":              dl.get("notable_shifts", []),
     })
 
-    # Shots -- separate by home/away. Fix 33b: pipeline produces
-    # reports for both teams independently; "for" == home, "against" == away.
-    home_team = summary.get("home_team", "")
+    # Shots -- separate by focus/opponent. Fix 33b: pipeline produces
+    # reports for both teams independently; "for" == focus, "against"
+    # == opponent. v3 Step 5 (block 3): switch the classification
+    # variable from `home_team` to `focus_team` with `home_team` as
+    # fallback. Pre-v3 match_config.json files don't carry focus_team
+    # (Fix 33b removed it explicitly), so the home_team fallback keeps
+    # the v2 behaviour unchanged on the existing corpus.
+    home_team  = summary.get("home_team", "")
+    _shot_mc   = {}
+    _shot_cfg_path = os.path.join(
+        os.path.dirname(os.path.dirname(merged_path)), "match_config.json")
+    if os.path.exists(_shot_cfg_path):
+        try:
+            with open(_shot_cfg_path, encoding="utf-8") as _scf:
+                _shot_mc = json.load(_scf)
+        except Exception:
+            _shot_mc = {}
+    focus_team = _shot_mc.get("focus_team") or home_team
     for shot in w.get("shot_attempts", []):
-        if shot.get("team") == home_team:
+        if shot.get("team") == focus_team:
             summary["shots_for"].append(shot)
         else:
             summary["shots_against"].append(shot)
@@ -504,6 +615,37 @@ def update_running_summary(merged_path: str,
     except Exception:
         pass
     summary["individual_observations"].extend(raw_obs)
+
+    # v3 Step 5 (block 5): filter individual_observations into three
+    # specialised accumulators. Each filtered entry is a dict() copy
+    # with a window field appended -- this preserves the original
+    # observation in individual_observations and gives downstream
+    # readers a fast-access window-tagged view of only the relevant
+    # subset. On pre-v3 data these stay empty (the v2 player prompt
+    # doesn't emit between_lines / condition / temperament_observation
+    # fields); on v3 data they populate.
+    for obs in raw_obs:
+        zone = obs.get("zone")
+        if isinstance(zone, dict) and zone.get("between_lines"):
+            summary["between_lines_events"].append({
+                "window":         w.get("window"),
+                "timestamp":      obs.get("timestamp"),
+                "player":         obs.get("player"),
+                "team":           obs.get("team"),
+                "between_lines":  zone.get("between_lines"),
+                "lateral_lane":   zone.get("lateral_lane"),
+                "vertical_third": zone.get("vertical_third"),
+                "frequency":      obs.get("frequency"),
+                "outcome":        obs.get("outcome"),
+            })
+        if obs.get("condition") and obs.get("condition_absent_outcome"):
+            obs_with_window = dict(obs)
+            obs_with_window["window"] = w.get("window")
+            summary["conditional_pattern_observations"].append(obs_with_window)
+        if obs.get("action_category") == "temperament_observation":
+            obs_with_window = dict(obs)
+            obs_with_window["window"] = w.get("window")
+            summary["temperament_observations"].append(obs_with_window)
 
     # Set pieces: validate timestamps + types, reject invalid entries, auto-queue valid ones
     _window_id = w.get("window") or w.get("agent_id")
@@ -537,9 +679,15 @@ def update_running_summary(merged_path: str,
     for kick in (w.get("gk_kicks") or []):
         summary["gk_kicks"].append(kick)
 
-    # Duels — both teams [I]
+    # Duels -- both teams [I]
+    # v3 Step 5 (block 4): enrich each duel entry with a per-window
+    # `window` field for window-conditioned analytics. dict() copy
+    # preserves any `post_duel_outcome` field already supplied by the
+    # agent (the field is part of the duel dict, not added here).
     for duel in (w.get("duels") or []):
-        summary["duels"].append(duel)
+        duel_with_window = dict(duel)
+        duel_with_window["window"] = w.get("window")
+        summary["duels"].append(duel_with_window)
     # Transitions (added in schema update)
     if "transitions" not in summary:
         summary["transitions"] = []
@@ -581,6 +729,67 @@ def update_running_summary(merged_path: str,
     # Data gap flag
     if w.get("window_confidence", {}).get("data_gap_warning"):
         summary["data_gap_windows"].append(w.get("window"))
+
+    # v3 Step 5 (block 2): per-window appends for the new accumulators.
+    # Each block reads agent output fields that the v3 prompts produce;
+    # on pre-v3 runs the source field is absent and the accumulator
+    # contribution is empty (no crash, no fake data).
+
+    # quiet_windows -- flagged by the v3 player agent when a window
+    # produced unusually few observations. Source: w["quiet_window"]
+    # (a dict with `flagged`, `reason`, `observations_produced`).
+    _quiet = w.get("quiet_window") or {}
+    if isinstance(_quiet, dict) and _quiet.get("flagged"):
+        summary["quiet_windows"].append({
+            "window":                w.get("window"),
+            "reason":                _quiet.get("reason"),
+            "observations_produced": _quiet.get("observations_produced"),
+        })
+
+    # vertical_progression_counts / _totals -- read each window's
+    # pass_sequences and tally vertical_progression. Until Step 18
+    # lands these all resolve to "unknown" (see Step 4 commit
+    # 54f5e09). Per-window dict is appended either way so consumers
+    # of vertical_progression_counts see the same shape pre- and
+    # post-Step-18.
+    _window_pp = _count_vertical_progressions(_ps_raw)
+    summary["vertical_progression_counts"].append({
+        "window": w.get("window"),
+        "counts": _window_pp,
+    })
+    for _vp_k, _vp_v in _window_pp.items():
+        summary["vertical_progression_totals"][_vp_k] = (
+            summary["vertical_progression_totals"].get(_vp_k, 0) + _vp_v
+        )
+
+    # defending_third_turnover_count / _sequence_count -- numerator
+    # and denominator for defending-third turnover rate metric.
+    # Same Step-18 dependency as above (reads zone_start.vertical_third
+    # which is None on pre-Step-18 data, so both contribute zero).
+    _dt_turn, _dt_total = _count_defending_turnovers(_ps_raw)
+    summary["defending_third_turnover_count"] = (
+        summary.get("defending_third_turnover_count", 0) + _dt_turn
+    )
+    summary["defending_third_sequence_count"] = (
+        summary.get("defending_third_sequence_count", 0) + _dt_total
+    )
+
+    # watch_list_confirmations -- read w["watch_list_confirmations"]
+    # (produced by the v3 player-action confirmation loop -- Step 14).
+    # Each entry gets a window field appended.
+    for _wlc in (w.get("watch_list_confirmations") or []):
+        _wlc_with_window = dict(_wlc)
+        _wlc_with_window["window"] = w.get("window")
+        summary["watch_list_confirmations"].append(_wlc_with_window)
+
+    # fouls_committed -- read w["fouls_committed"] (structural log
+    # from a future v3 structural agent additions block, per
+    # prompts/09_fouls_committed_block.md). Each entry gets a window
+    # field appended.
+    for _foul in (w.get("fouls_committed") or []):
+        _foul_with_window = dict(_foul)
+        _foul_with_window["window"] = w.get("window")
+        summary["fouls_committed"].append(_foul_with_window)
 
     # Findings -- accumulate with gate states already applied
     summary["findings"].extend(w.get("findings", []))
