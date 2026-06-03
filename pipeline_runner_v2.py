@@ -1894,6 +1894,21 @@ def run_pipeline(match_dir: str, quality: str = "standard",
         ("3f_sequences",    "accumulator",        "accumulate_all_windows"),
         ("3h_ground_truth", "ground_truth",       "build_ground_truth_check"),
         ("3i_escalation",   "escalation_router",  "build_escalation_queue"),
+        # v3 port Step 10: player-action escalation queue. Reads each
+        # merged window for player_escalation_queue[] entries (emitted
+        # by the v3 player prompt -- Step 11+) and writes
+        # player_escalation_queue.json with up to a separate 5-item cap.
+        # Parallel-not-replacement to 3i_escalation: different input
+        # field, different output file, no collision with
+        # confirmation_queue.json. PIPELINE_STEPS already declared
+        # 3i_player_escalation at Step 1 (commit d0a2414); this commit
+        # wires the runner. NO AGENT CALLS in this step -- the queue
+        # gets BUILT here; per-item agent confirmation is Step 14's
+        # deliverable (the Phase 3b-player block, analogous to Phase 3b
+        # for set-piece bursts). Bayern's queue file will be empty on
+        # current corpus runs because no v3 player prompt has emitted
+        # player_escalation_queue[] entries yet -- expected, not a fail.
+        ("3i_player_escalation","player_escalation_router","build_player_escalation_queue"),
     ])
 
     # ── PHASE 3b: Set piece 5fps bursts ──────────────────────────────────────
