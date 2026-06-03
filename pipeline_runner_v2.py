@@ -2212,13 +2212,25 @@ def build_tactical_prompt(match_dir: str, mc: dict,
                            report_level: str = "standard") -> str:
     """Build the Step 4a tactical report prompt from pipeline data files."""
     files = {}
+    # v3 Step 7: added "player_summary_cards.json" to the file-load list.
+    # Cards are surfaced under a stable key inside data_block below.
+    # Absence -> {}: the report falls back to v2-style derivation from
+    # running_summary.individual_observations[] (per the SKILL.md
+    # Language Rules 12-19 block that report_structure injects).
     for fname in ["running_summary.json", "pass_sequences.json",
                   "deep_skill_metrics.json", "source_profile.json",
-                  "report_readiness.json"]:
+                  "report_readiness.json",
+                  "player_summary_cards.json"]:
         path = os.path.join(match_dir, fname)
         if os.path.exists(path):
-            with open(path, encoding="utf-8") as f:
-                files[fname] = json.load(f)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    files[fname] = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                # Parse-failure-safe: a corrupt optional file shouldn't
+                # block the report. Log and treat as absent.
+                print(f"  [WARN] Failed to parse {fname}: {e}")
+                files[fname] = {}
         else:
             files[fname] = {}
 
@@ -2239,6 +2251,7 @@ def build_tactical_prompt(match_dir: str, mc: dict,
     rs  = files["running_summary.json"]
     psq = files["pass_sequences.json"]
     dsm = files["deep_skill_metrics.json"]
+    psc = files["player_summary_cards.json"]  # v3 Step 7: empty {} if absent
 
     data_block = json.dumps({
         "match_config": {k: mc.get(k) for k in [
@@ -2258,6 +2271,13 @@ def build_tactical_prompt(match_dir: str, mc: dict,
                                       else []) or [])[:50],
         "deep_skill_metrics":       (dsm.get("metrics", []) if isinstance(dsm, dict)
                                      else []) or [],
+        # v3 Step 7: player_summary_cards surfaced under a stable key.
+        # Empty {} when the file is absent (pre-v3 runs); the report
+        # follows SKILL.md Language Rules 12-19 -- prefer card-derived
+        # fields when present, fall back to individual_observations
+        # when the cards dict is empty. NEVER produce a "no data"
+        # placeholder; NEVER omit player sections.
+        "player_summary_cards":     psc if isinstance(psc, dict) else {},
     }, indent=1, default=str)
 
     constraint_block = _load_skill_block(
@@ -2306,13 +2326,23 @@ def build_opposition_prompt(match_dir: str, mc: dict,
                              report_level: str = "standard") -> str:
     """Build the Step 4b opposition scouting report prompt."""
     files = {}
+    # v3 Step 7: opposition report is the PRIMARY consumer of the cards'
+    # opposition-facing fields (comparative_rank_in_position,
+    # tactical_fouling_indicator, position_role_mismatch_flags[]). When
+    # cards are absent, falls back to v2-style derivation from
+    # running_summary.individual_observations[].
     for fname in ["running_summary.json", "pass_sequences.json",
                   "deep_skill_metrics.json", "source_profile.json",
-                  "report_readiness.json"]:
+                  "report_readiness.json",
+                  "player_summary_cards.json"]:
         path = os.path.join(match_dir, fname)
         if os.path.exists(path):
-            with open(path, encoding="utf-8") as f:
-                files[fname] = json.load(f)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    files[fname] = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"  [WARN] Failed to parse {fname}: {e}")
+                files[fname] = {}
         else:
             files[fname] = {}
 
@@ -2338,6 +2368,7 @@ def build_opposition_prompt(match_dir: str, mc: dict,
     rs  = files["running_summary.json"]
     psq = files["pass_sequences.json"]
     dsm = files["deep_skill_metrics.json"]
+    psc = files["player_summary_cards.json"]  # v3 Step 7: empty {} if absent
 
     data_block = json.dumps({
         "match_config": {k: mc.get(k) for k in [
@@ -2356,6 +2387,15 @@ def build_opposition_prompt(match_dir: str, mc: dict,
                                      else []) or [])[:50],
         "deep_skill_metrics":      (dsm.get("metrics", []) if isinstance(dsm, dict)
                                     else []) or [],
+        # v3 Step 7: opposition report is the primary consumer of
+        # player_summary_cards' opposition-facing fields
+        # (comparative_rank_in_position, tactical_fouling_indicator,
+        # position_role_mismatch_flags[], conditional_patterns,
+        # temporal_arc). When the cards dict is empty, follow SKILL.md
+        # Language Rule fallback: derive player profiles from
+        # individual_observations directly without crashing or
+        # producing "no data" placeholders.
+        "player_summary_cards":    psc if isinstance(psc, dict) else {},
     }, indent=1, default=str)
 
     constraint_block = _load_skill_block(

@@ -604,6 +604,27 @@ def _load_json(path: str) -> dict | list:
     return {}
 
 
+def _load_json_optional(path: str) -> dict | list:
+    """Parse-failure-safe loader for files whose absence OR corruption
+    must never block the synthesis path. v3 Step 7 introduced this for
+    player_summary_cards.json -- the file legitimately doesn't exist on
+    pre-v3 runs and a corrupt cards file shouldn't take down the report.
+
+    Returns the loaded dict on success, an empty dict on any failure
+    (absent file, JSON parse error, I/O error). Logs a warning on
+    parse failure so the operator can spot a real corruption (vs the
+    legitimate-absence case which logs nothing here -- that's
+    handled by build_input_bundle's OPTIONAL_FILES warning loop)."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"  [WARN] Failed to parse {os.path.basename(path)}: {e}")
+        return {}
+
+
 def _load_text(path: str) -> str:
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
@@ -625,6 +646,12 @@ OPTIONAL_FILES = [
     "shots_log.json",
     "flagged_moments.md",
     "report_readiness.json",
+    # v3 Step 7: player_summary_cards.json -- per-player cards built by
+    # player_aggregator (Step 9 of porting plan). On pre-v3 runs and
+    # any run where Step 9 hasn't produced cards yet, the file is
+    # absent and the report falls back to v2-style derivation from
+    # running_summary.individual_observations.
+    "player_summary_cards.json",
 ]
 
 
@@ -754,6 +781,12 @@ def build_input_bundle(match_dir: str) -> dict:
         "shots_log":          _load_json(os.path.join(match_dir, "shots_log.json")),
         "flagged_moments":    _load_text(os.path.join(match_dir, "flagged_moments.md")),
         "report_readiness":   _load_json(os.path.join(match_dir, "report_readiness.json")),
+        # v3 Step 7: player_summary_cards surfaced under a stable key.
+        # Empty dict on absence (graceful-degradation contract); the
+        # report-writing prompts detect the empty case and fall back to
+        # v2-style derivation from individual_observations.
+        "player_summary_cards": _load_json_optional(
+            os.path.join(match_dir, "player_summary_cards.json")),
     }
 
 
