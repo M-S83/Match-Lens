@@ -2021,6 +2021,15 @@ def run_pipeline(match_dir: str, quality: str = "standard",
     _run_python_steps([
         ("3j_readiness",    "build_readiness_check",  "build_readiness_check"),
         ("3k_metrics",      "deep_skill_metrics",      "build_deep_skill_metrics"),
+        # v3 port Step 9: per-player summary cards. Reads running_summary
+        # + match_config + source_profile; writes player_summary_cards.json.
+        # PIPELINE_STEPS already declared 3k2_player_cards at Step 1
+        # (commit d0a2414); this commit wires the runner to the
+        # already-registered step. Output is consumed by Step 7's wiring
+        # into synthesis_agent.build_input_bundle and the legacy 4a/4b
+        # prompt builders, all surfaced under the "player_summary_cards"
+        # stable key in the prompt data block.
+        ("3k2_player_cards","player_aggregator",       "build_player_summary_cards"),
         ("3l_synthesis",    "synthesis_agent",         "run_synthesis"),
     ])
 
