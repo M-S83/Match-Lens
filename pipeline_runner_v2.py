@@ -261,6 +261,55 @@ def _load_source_profile(match_dir: str) -> dict:
     }
 
 
+def _v3_preflight_warn(mc: dict, source_profile: dict) -> None:
+    """v3 port Step 16 — WARN (do NOT raise) on missing v3-only inputs.
+
+    Three keys gate full v3 behaviour without being fatal:
+      - match_config.pitch_dimensions_assumed -- zone-normalisation
+        and any metric reading pitch dims fall back to defaults if
+        absent.
+      - match_config.watch_list -- watch_list_summary metric is
+        AVAILABLE only when this is populated; absent means the
+        watch-list accumulator surfaces nothing.
+      - source_profile.visibility_scores.off_ball_coverage_score --
+        off-ball gating falls back to source_type defaults if missing.
+
+    Also invokes source_profiler.validate_source_profile() when
+    importable, surfacing whatever issues it returns. Validation
+    failure does NOT block; the operator decides whether to re-classify.
+
+    All output goes to stdout with a "[v3 pre-flight WARN]" prefix so
+    it's grep-friendly in batch logs.
+    """
+    if mc.get("pitch_dimensions_assumed") is None:
+        print("  [v3 pre-flight WARN] match_config.pitch_dimensions_assumed "
+              "is missing -- zone-normalisation and metrics that read pitch "
+              "dimensions will fall back to defaults.")
+    if not mc.get("watch_list"):
+        print("  [v3 pre-flight WARN] match_config.watch_list is empty or "
+              "absent -- watch-list confirmations accumulator will not "
+              "surface anything; watch_list_summary metric will report "
+              "UNAVAILABLE.")
+    _vs = (source_profile or {}).get("visibility_scores") or {}
+    if _vs.get("off_ball_coverage_score") is None:
+        print("  [v3 pre-flight WARN] source_profile.visibility_scores."
+              "off_ball_coverage_score is missing -- off-ball gating will "
+              "fall back to source_type defaults.")
+    try:
+        from source_profiler import validate_source_profile as _v_sp
+    except ImportError:
+        return
+    if not source_profile:
+        return
+    _vr = _v_sp(source_profile)
+    if not _vr.get("ok"):
+        _iss = _vr.get("issues", [])
+        print(f"  [v3 pre-flight WARN] source_profile validation surfaced "
+              f"{len(_iss)} issue(s):")
+        for _line in _iss:
+            print(f"    - {_line}")
+
+
 SOURCE_CAPABILITY_VEO = """
 SOURCE TYPE: veo_ball_tracking
 Camera: Ball-tracking. Camera follows the ball.
@@ -1805,6 +1854,15 @@ def run_pipeline(match_dir: str, quality: str = "standard",
     with open(mc_path, encoding="utf-8") as f: mc = json.load(f)
     with open(wp_path, encoding="utf-8")  as f: wp = json.load(f)
 
+    # ── v3 pre-flight WARN block (v3 port Step 16) ────────────────────────────
+    # Surface missing v3-only inputs early so the operator sees them in the
+    # opening minutes of the run rather than discovering them mid-pipeline
+    # when a metric quietly falls back to its default or skips a row. None of
+    # these conditions is fatal: v3 modules tolerate absence (emit
+    # "unavailable" status, skip language-rule rows, fall back to source-type
+    # defaults). The block prints WARN-prefixed lines but never raises.
+    _v3_preflight_warn(mc, _load_source_profile(match_dir))
+
     windows     = wp.get("windows", [])
     # Cast to str so window_ids match JSON state keys (always strings).
     window_ids  = [str(get_window_id(w)) for w in windows]
@@ -2951,10 +3009,16 @@ if __name__ == "__main__":
             print("No pipeline state found. Run without --force-reports first.")
             sys.exit(1)
         if args.force_merge:
-            # Reset merge and all downstream steps so they rerun
-            for step in ["3e_merge","3f_shots","3f_sequences","3g_summary",
-                         "3h_ground_truth","3i_escalation","3j_readiness",
-                         "3k_metrics","3l_synthesis",
+            # Reset merge and all downstream steps so they rerun.
+            # v3 port Step 15: added 3e_zone_normalise, 3i_player_escalation,
+            # 3k2_player_cards to the pipeline-step reset list, and added
+            # per-window reset of 3i_player_action (a WINDOW step driven by
+            # 3i_player_escalation's queue output).
+            for step in ["3e_merge","3e_zone_normalise",
+                         "3f_shots","3f_sequences","3g_summary",
+                         "3h_ground_truth","3i_escalation",
+                         "3i_player_escalation","3j_readiness",
+                         "3k_metrics","3k2_player_cards","3l_synthesis",
                          "4a_tactical_report","4b_opposition_report",
                          "4c_flagged_moments","4d_pass_network"]:
                 state["steps"][step] = "pending"
@@ -2963,24 +3027,35 @@ if __name__ == "__main__":
             for wid, steps in state["windows"].items():
                 if steps.get("3d_event") == "failed":
                     steps["3d_event"] = "skipped"
+                # v3 port Step 15: drop any prior 3i_player_action result so
+                # the Phase 3b-player block re-processes the regenerated queue.
+                if "3i_player_action" in steps:
+                    steps["3i_player_action"] = "pending"
             from pipeline_state import _save as _ps_save
             _ps_save(args.match_dir, state)
             print("  State reset for merge + reports. Re-running...")
         if args.force_structural:
-            # Reset 3a + 3b windows to pending, and 3e downstream steps
+            # Reset 3a + 3b windows to pending, and 3e downstream steps.
+            # v3 port Step 15: added 3i_player_action to the per-window reset
+            # tuple, and 3e_zone_normalise / 3i_player_escalation /
+            # 3k2_player_cards to the pipeline-step reset list.
             for wid in state.get("windows", {}):
-                for wstep in ("3a", "3b"):
-                    state["windows"][wid][wstep] = "pending"
-            for step in ["3e_merge","3f_shots","3f_sequences","3g_summary",
-                         "3h_ground_truth","3i_escalation","3j_readiness",
-                         "3k_metrics","3l_synthesis",
+                for wstep in ("3a", "3b", "3i_player_action"):
+                    if wstep in state["windows"][wid]:
+                        state["windows"][wid][wstep] = "pending"
+            for step in ["3e_merge","3e_zone_normalise",
+                         "3f_shots","3f_sequences","3g_summary",
+                         "3h_ground_truth","3i_escalation",
+                         "3i_player_escalation","3j_readiness",
+                         "3k_metrics","3k2_player_cards","3l_synthesis",
                          "4a_tactical_report","4b_opposition_report",
                          "4c_flagged_moments","4d_pass_network"]:
                 state["steps"][step] = "pending"
             from pipeline_state import _save as _ps_save_s
             _ps_save_s(args.match_dir, state)
-            print(f"  Reset: all {len(state['windows'])} windows → 3a + 3b pending, "
-                  f"3e–4d reset. Re-running from structural pass...")
+            print(f"  Reset: all {len(state['windows'])} windows → 3a + 3b + "
+                  f"3i_player_action pending, 3e–4d reset. Re-running from "
+                  f"structural pass...")
         elif args.force_reports:
             # Prefer re-running 3l_synthesis (richer agent) when it has run before.
             # Fall back to legacy 4a/4b only when 3l never produced output.
