@@ -12,6 +12,28 @@ Usage (standalone):
 
 Called from pipeline_runner_v2.py as:
     ("3l_synthesis", "synthesis_agent", "run_synthesis")
+
+────────────────────────────────────────────────────────────────────────
+Opposition report filename convention (v3, canonical)
+────────────────────────────────────────────────────────────────────────
+Opposition reports use sanitized full team names:
+
+    opposition_report_<re.sub(r'[^\w\-]', '_', team_name.lower())>.md
+
+This convention produces a deterministic, round-trip-able filename
+from the ``home_team`` / ``away_team`` strings in match_config.json
+without any short-name lookup. Example: "Felixstowe & Walton United"
+→ ``opposition_report_felixstowe___walton_united.md`` (the ``&`` and
+its two flanking spaces each map to ``_``, hence the triple underscore).
+
+Any shorter-named sibling file (e.g. ``opposition_report_felixstowe.md``)
+is a v2 leftover from before this convention landed. Downstream tools
+should glob ``opposition_report_*.md`` rather than constructing exact
+filenames; ``md_to_docx.py:334`` is already convention-agnostic.
+
+Same convention applies to advanced opposition reports
+(``advanced_opposition_report_<sanitized_name>.md`` at lines ~1144-45).
+────────────────────────────────────────────────────────────────────────
 """
 
 import json
