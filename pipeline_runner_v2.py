@@ -438,7 +438,7 @@ Your response MUST be valid JSON containing exactly these top-level fields.
 Do not add extra top-level fields. Do not rename these fields.
 
 {
-  "timestamp_range": "MM:SS-MM:SS (match clock, not broadcast time)",
+  "timestamp_range": "MM:SS-MM:SS (copy the MATCH-CLOCK RANGE from the prompt header above verbatim — do not derive or invent this field)",
   "half": "1H / 2H / ET1 / ET2",
   "match_state": "level / home_winning / away_winning",
   "score_home": 0,
@@ -521,11 +521,11 @@ Do not add extra top-level fields. Do not rename these fields.
       "team":               "[home_kit or away_kit]",
       "taker_position":     "[kit colour #N, or null if unclear]",
       "delivery_observed":  true,
-      "delivery_zone":      "[near_post / far_post / penalty_spot / edge_of_box / short]",
-      "bodies_in_box":      0,
-      "marking":            "[zonal / man / mixed / unclear]",
-      "rest_defence":       0,
-      "outcome":            "[goal / cleared_near_post / cleared_far_post / gk_claim / gk_punch / second_phase / lost_possession]",
+      "delivery_zone":      "[near_post / far_post / penalty_spot / edge_of_box / short — or null if not observable]",
+      "bodies_in_box":      null,
+      "marking":            "[zonal / man / mixed / unclear — or null if not observable]",
+      "rest_defence":       null,
+      "outcome":            "[goal / cleared_near_post / cleared_far_post / gk_claim / gk_punch / second_phase / lost_possession — or null if not observable]",
       "delivery_type":      null,
       "runners":            null,
       "wall_size":          null,
@@ -711,6 +711,12 @@ READ AT 1fps (populate where visible):
   outcome:        goal / cleared_near_post / cleared_far_post / gk_claim /
                   gk_punch / second_phase / lost_possession
 
+For set_pieces and key_moments specifically: when in doubt, return null on the
+unobservable field. Do NOT pick the first option in the enum list as a default.
+Do NOT use the example schema values as defaults. The schema examples illustrate
+field shape, not default values. The downstream pipeline tolerates null fields
+cleanly; it does not tolerate fabricated content.
+
 DELIVERY_OBSERVED: Set to false if you cannot see the delivery itself.
   Still log the entry with the setup frame timestamp -- the 5fps burst will
   recover delivery detail.
@@ -724,6 +730,37 @@ SETUP DETECTION -- log a set_piece entry whenever you observe ANY of:
 
 DO NOT attempt to populate at 1fps (leave as null -- filled by 5fps burst):
   delivery_type, runners, wall_size, wall_position
+
+=== INCONCLUSIVE HANDLING for set_piece fields ===
+The following rules apply field-by-field. Each is independent — leaving one
+field null does NOT mean abandoning the whole entry.
+
+  delivery_zone:  If you cannot directly observe where the ball was delivered
+                  to (camera is on the taker / corner flag / pre-delivery
+                  setup, not on the box at the moment of delivery), set
+                  delivery_zone to null. Do NOT default to "near_post".
+
+  bodies_in_box:  If you cannot count the bodies in the box at the delivery
+                  moment (penalty area not in frame, or insufficient frames
+                  spanning the delivery), set bodies_in_box to null. Do NOT
+                  default to a guessed integer.
+
+  marking:        If you cannot determine the marking system from the visible
+                  defensive shape at delivery (zonal vs man vs mixed), set
+                  marking to null. Do NOT default to "mixed".
+
+  rest_defence:   If you cannot determine the rest-defence shape behind the
+                  delivery zone, set rest_defence to null.
+
+  outcome:        If the outcome of the delivery is not visible (you see the
+                  run-up but not the resulting clearance / header / goal /
+                  GK action), set outcome to null. Do NOT default to
+                  "cleared_near_post".
+
+The 5fps set_piece burst layer recovers what 1fps could not. Leaving fields
+null at this stage is correct behaviour, not a failure. The downstream
+aggregator tolerates null fields cleanly; it does not tolerate fabricated
+content.
 """
 
 
@@ -911,6 +948,50 @@ Central play only: defending_third / middle / attacking_third.
     else:
         _attack_dir = mc.get("attack_direction_1h", "unknown")
 
+    # Task 129 (v3.0.1 H4+H1 fix): derive the AUTHORITATIVE match-clock range
+    # for this window and inject it into the prompt so the agent doesn't
+    # fabricate its own `timestamp_range` (Tasks 125-127 surfaced systematic
+    # drift in agent-declared ranges — 11/13 agents drifted >5 min, several
+    # claimed ranges matching a different window entirely). The agent's job
+    # is now to echo this range back verbatim, not to derive it.
+    #
+    # Boundary sources differ by match-config convention: Bayern-style configs
+    # store ko_1h_s / ko_2h_s directly; others (Gorleston, Felix) leave those
+    # null and stash the values in match_boundaries.json. Read from match_config
+    # first, fall back to match_boundaries.json. If neither has them, fall
+    # back to a 0-offset (so the range still renders even if it's wrong —
+    # the agent will still emit the field, just with a degraded value).
+    _ko_1h_s = mc.get("ko_1h_s")
+    _ko_2h_s = mc.get("ko_2h_s")
+    if _ko_1h_s is None or _ko_2h_s is None:
+        _mb_path = os.path.join(match_dir, "match_boundaries.json")
+        if os.path.exists(_mb_path):
+            try:
+                with open(_mb_path, encoding="utf-8") as _mbf:
+                    _mb = json.load(_mbf)
+                _bd = _mb.get("boundaries", {})
+                if _ko_1h_s is None:
+                    _ko_1h_s = (_bd.get("ko_1h") or {}).get("seconds")
+                if _ko_2h_s is None:
+                    _ko_2h_s = (_bd.get("ko_2h") or {}).get("seconds")
+            except Exception:
+                pass
+    _ko_1h_s   = _ko_1h_s or 0
+    _ko_2h_s   = _ko_2h_s or 0
+    _win_start = window.get("start_s", 0)
+    _win_end   = window.get("end_s", _win_start + 300)
+    if _half == "1H":
+        _mc_start = max(0, _win_start - _ko_1h_s)
+        _mc_end   = max(0, _win_end   - _ko_1h_s)
+    elif _half in ("2H", "ET1"):
+        _mc_start = max(2700, (_win_start - _ko_2h_s) + 2700)
+        _mc_end   = max(2700, (_win_end   - _ko_2h_s) + 2700)
+    else:
+        _mc_start = _win_start
+        _mc_end   = _win_end
+    _mc_range_str = (f"{int(_mc_start//60):02d}:{int(_mc_start%60):02d}-"
+                     f"{int(_mc_end  //60):02d}:{int(_mc_end  %60):02d}")
+
     return f"""You are a football tactical analyst. Review the frames below and produce a structured JSON output ONLY. No prose. No preamble. No markdown fences.
 
 === MATCH CONTEXT ===
@@ -921,6 +1002,7 @@ AWAY TEAM: {away_team}
 ATTACK DIR: {_attack_dir}
 WINDOW:     {window_id}
 HALF:       {window.get('half', '?')}
+MATCH-CLOCK RANGE: {_mc_range_str}  (this is your AUTHORITATIVE timestamp_range — emit it verbatim in the output, do not derive)
 
 MATCH STATE: {score_h}-{score_a} ({match_state})
 Do not use this to assume intent or judge performance.
