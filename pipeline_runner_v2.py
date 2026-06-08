@@ -515,8 +515,10 @@ Do not add extra top-level fields. Do not rename these fields.
 
   "set_pieces": [
     {
-      "timestamp":          "[MMmSSs]",
+      "timestamp":          "[MMmSSs — must match delivery_frame (or start of delivery_frame_range) within 1s]",
       "timestamp_inferred": false,
+      "delivery_frame":     "[frame_MMmSSs.jpg — single frame where you observed the delivery moment precisely. Use this when you can identify ONE specific frame. Otherwise set to null and use delivery_frame_range below.]",
+      "delivery_frame_range": "[[\"frame_MMmSSs.jpg\", \"frame_MMmSSs.jpg\"] — start/end frame pair when you saw activity consistent with the set_piece across multiple frames but cannot isolate the exact delivery moment. Range MUST span no more than 10 seconds. Set to null if you used delivery_frame above.]",
       "type":               "[corner_left / corner_right / direct_fk / indirect_fk / throw_final_third / kickoff]",
       "team":               "[home_kit or away_kit]",
       "taker_position":     "[kit colour #N, or null if unclear]",
@@ -535,7 +537,9 @@ Do not add extra top-level fields. Do not rename these fields.
 
   "key_moments": [
     {
-      "minute": "MM:SS",
+      "minute": "MM:SS — must match observation_frame (or start of observation_frame_range) within 1s",
+      "observation_frame": "[frame_MMmSSs.jpg — single frame where you observed the moment precisely. Use this for moments you saw directly (cards being shown, goal celebrations). Set to null and use observation_frame_range when the moment spans multiple frames.]",
+      "observation_frame_range": "[[\"frame_MMmSSs.jpg\", \"frame_MMmSSs.jpg\"] — start/end frame pair for moments inferred from context across multiple frames (tactical_shift, momentum_change). Range MUST span no more than 10 seconds. Set to null if you used observation_frame above.]",
       "type": "goal / card / substitution / tactical_shift",
       "team": "home_kit or away_kit",
       "description": "brief factual description"
@@ -730,6 +734,47 @@ SETUP DETECTION -- log a set_piece entry whenever you observe ANY of:
 
 DO NOT attempt to populate at 1fps (leave as null -- filled by 5fps burst):
   delivery_type, runners, wall_size, wall_position
+
+=== ANCHOR REQUIREMENT for set_piece and key_moment timestamps ===
+Each set_piece and key_moment must be anchored to real frame(s) you
+examined. Use ONE of two anchor types:
+
+  delivery_frame: <single filename> -- when you saw the delivery (or
+  key moment) in one specific frame and can identify it precisely.
+
+  delivery_frame_range: ["<start>", "<end>"] -- when you saw activity
+  consistent with the set_piece across multiple frames but cannot
+  isolate the exact delivery moment. The range should span no more
+  than 10 seconds (typically 5-8 seconds for a corner sequence).
+
+Sub-second events (the moment of delivery, the moment of a card shown,
+the moment of a goal) often span only 1-2 frames at 1fps sampling. If
+you can see that something happened but cannot identify the exact frame,
+use a range. The range is honest; null is honest; a fabricated single-
+frame anchor is not.
+
+If you can identify neither a single anchor frame nor a defensible
+range: do NOT emit the entry. Inferring that "a corner probably happened
+in this window" without visual evidence of it is fabrication.
+
+For key_moments specifically: use observation_frame for moments you saw
+directly (cards being shown, goal celebrations); use observation_frame_
+range for moments you inferred from context across multiple frames
+(tactical_shift, momentum_change).
+
+The timestamp field MUST be derived from the anchor:
+  - If you used delivery_frame="frame_25m11s.jpg", timestamp must be
+    "25m11s" or within 1 second.
+  - If you used delivery_frame_range=["frame_25m11s.jpg",
+    "frame_25m17s.jpg"], timestamp must match the START of the range
+    (here "25m11s") within 1 second.
+Mismatched timestamp + frame anchor is a validation failure and the
+entry will be dropped downstream.
+
+The valid frame range for this window is shown in the prompt header
+above (MATCH-CLOCK RANGE + VIDEO-FRAME RANGE). Cite real frames from
+the frames you were actually shown in this input. Frames outside the
+window's video-clock range are not valid anchors.
 
 === INCONCLUSIVE HANDLING for set_piece fields ===
 The following rules apply field-by-field. Each is independent — leaving one
@@ -1003,6 +1048,7 @@ ATTACK DIR: {_attack_dir}
 WINDOW:     {window_id}
 HALF:       {window.get('half', '?')}
 MATCH-CLOCK RANGE: {_mc_range_str}  (this is your AUTHORITATIVE timestamp_range — emit it verbatim in the output, do not derive)
+VIDEO-FRAME RANGE: frame_{_win_start//60:02d}m{_win_start%60:02d}s.jpg through frame_{_win_end//60:02d}m{_win_end%60:02d}s.jpg  (these are the frames you were shown; any delivery_frame / observation_frame anchor MUST cite a frame from this range)
 
 MATCH STATE: {score_h}-{score_a} ({match_state})
 Do not use this to assume intent or judge performance.
@@ -1822,7 +1868,27 @@ Type:           {sp_type}
 Team:           {team} ({team_name})
 Taker position: {taker_pos if taker_pos else "null (not observed at 1fps)"}
 
-=== 1FPS OBSERVATIONS TO CONFIRM ===
+=== TASK ===
+FIRST, verify the claimed event exists.
+
+Do these {target_fps}fps frames actually show a {sp_type} at {anchor_ts}
+taken by the {team}?
+
+If NO -- the frames show open play, kickoff, halftime, stoppage, a
+different event, or the camera is on a different part of the pitch:
+
+  Set status to "inconclusive".
+  Populate rejection_reason with what you actually see in the frames
+  (e.g. "Camera on centre circle for kickoff; no corner taken at this
+  timestamp", or "Frames show players returning from celebration after a
+  goal in the previous minute; no set piece occurring").
+  STOP. Do NOT confirm fields. Do NOT fabricate runners. Do NOT write a
+  burst_notes narrative.
+
+If YES -- the {sp_type} is visible -- set status to "confirmed" and
+continue.
+
+=== 1FPS OBSERVATIONS TO CONFIRM (only if status="confirmed") ===
 The 1fps pass recorded the following. Confirm each field or correct based on
 what the {target_fps}fps frames show. For any field you correct, log the prior
 value and a brief reason in the corrections array.
@@ -1880,12 +1946,28 @@ before or after (lead-up, second phase, a recycled corner). Focus output on the
 set piece at {anchor_ts}. Related events go in second_phase, NOT as new records.
 The pipeline has already queued separate bursts for separate events if needed.
 
+=== ANTI-GUESS RULE ===
+The downstream pipeline tolerates "inconclusive" cleanly. It does NOT tolerate
+fabricated content.
+
+If you find yourself inventing runners or authoring a burst_notes narrative
+without direct visual evidence in the burst frames, STOP and set status to
+"inconclusive". An inconclusive verdict surfaces an upstream 1fps fabrication;
+a fabricated confirmation buries it.
+
+The 1fps pass can produce false positives -- it samples one frame per second
+and sometimes interprets ambiguous goalmouth pressure as a set piece that did
+not happen. Your 5fps burst exists precisely to catch those. Reject them
+honestly. The pipeline depends on it.
+
 === OUTPUT FORMAT ===
 {{
   "set_piece_agent":     true,
   "anchor_timestamp":    "{anchor_ts}",
   "window":              "{window_id}",
   "team":                "{team}",
+  "status":              "confirmed | inconclusive",
+  "rejection_reason":    null,
   "burst_resolved":      true,
   "burst_fps":           {target_fps},
   "confirmed_fields": {{
@@ -1910,6 +1992,11 @@ The pipeline has already queued separate bursts for separate events if needed.
   }},
   "burst_notes": ""
 }}
+
+When status is "inconclusive": confirmed_fields and burst_fields are
+ignored downstream. Populate rejection_reason describing what you
+actually see in the burst frames. Do NOT fabricate runners. Do NOT
+write a burst_notes narrative. Leave corrections empty.
 """
 
 
@@ -2373,10 +2460,19 @@ def run_pipeline(match_dir: str, quality: str = "standard",
                     _anchor_dir = os.path.join(
                         _burst_root, f"sp_{_window_id}_{_anchor_ts}"
                     )
+                    # v3.0.1 bundle Task 141b: queue items now carry
+                    # anchor_video_s (video-clock seconds) computed by
+                    # escalation_router.py using match_boundaries.json.
+                    # Prefer it for extract_segment; fall back to legacy
+                    # match-clock-as-video parsing if the field is missing
+                    # (older queues, matches without match_boundaries.json).
+                    _anchor_video_s = _item.get("anchor_video_s")
+                    if _anchor_video_s is None:
+                        _anchor_video_s = _fe_ts2s(_anchor_ts)
                     try:
                         _frames = extract_segment(
                             video_path     = _video_path,
-                            anchor_seconds = _fe_ts2s(_anchor_ts),
+                            anchor_seconds = _anchor_video_s,
                             out_dir        = _anchor_dir,
                             target_fps     = _target_fps,
                             padding_s      = _padding,

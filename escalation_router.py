@@ -19,6 +19,7 @@ Usage:
 
 import json
 import os
+import re as _re
 import sys
 import glob
 from datetime import datetime
@@ -154,12 +155,116 @@ def count_match_goals(match_dir: str) -> int:
     return len(goals)
 
 
+def _load_match_boundaries(match_dir: str) -> dict:
+    """Load match_boundaries.json. Returns the boundaries dict or {} if absent."""
+    path = os.path.join(match_dir, "match_boundaries.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("boundaries", {}) or {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _infer_half(merged_dict: dict, merged_filename: str, timestamp: str) -> str:
+    """Determine which half a merged window covers.
+
+    Resolution order:
+      1. merged_dict["half"] if present and non-empty (modern merge_utils
+         writes this; Bayern's older files sometimes have it on 2H windows
+         but not 1H).
+      2. merged_dict["window"] label if it carries a "1H_" / "2H_" / "ET1_"
+         / "ET2_" prefix (Gorleston-era merge output).
+      3. The filename pattern (e.g. "agent_agent_11_W11_2H_50-55min_merged.json").
+         Robust because window_plan-driven merge naming embeds the half.
+      4. A timestamp heuristic as last resort: MM < 45 -> "1H", >= 45 -> "2H".
+         Imperfect (early-2H stoppage time can roll above 45 too), used only
+         when filename + dict both fail.
+
+    Returns "1H" / "2H" / "ET1" / "ET2" / "" if nothing matched.
+    """
+    half = merged_dict.get("half")
+    if isinstance(half, str) and half.upper() in ("1H", "2H", "ET1", "ET2"):
+        return half.upper()
+    label = merged_dict.get("window") or ""
+    if isinstance(label, str):
+        for prefix in ("1H", "2H", "ET1", "ET2"):
+            if label.startswith(prefix + "_") or label.startswith(prefix + " "):
+                return prefix
+    if merged_filename:
+        for prefix in ("1H", "2H", "ET1", "ET2"):
+            if f"_{prefix}_" in merged_filename:
+                return prefix
+    if isinstance(timestamp, str):
+        m = _re.match(r"^(\d+)m\d+s$", timestamp.strip())
+        if m:
+            mm = int(m.group(1))
+            return "1H" if mm < 45 else "2H"
+    return ""
+
+
+def _match_to_video_seconds(timestamp: str, half: str, boundaries: dict) -> int:
+    """v3.0.1 bundle Task 141b: convert match-clock timestamp to video-clock
+    seconds using match_boundaries.json kickoff offsets.
+
+    Why: confirmation_queue.json items store match-clock timestamps
+    ("02m45s" = 2 min 45 sec into the first half), which are correct for
+    display in reports and joining to merged-window set_piece records (which
+    also use match-clock). But the burst frame extraction uses the timestamp
+    as a video-clock offset, which is wrong when kickoff is not at video
+    time 0 (typical: 30-90s of warmup before kickoff).
+
+    This helper computes the video-clock equivalent. Queue items get an
+    additional `anchor_video_s` field with the correct video seconds; the
+    burst block reads that field for extract_segment instead of re-parsing
+    the match-clock string.
+
+    `half` is one of "1H" / "2H" / "ET1" / "ET2" (determined by
+    _infer_half above).
+
+    Returns None if conversion not possible (missing boundaries, unparseable
+    input, or unknown half). Falls back to legacy match-clock behavior at
+    the read site if None.
+    """
+    if not boundaries:
+        return None
+    if not timestamp or not isinstance(timestamp, str):
+        return None
+    m = _re.match(r"^(\d+)m(\d+)s$", timestamp.strip())
+    if not m:
+        return None
+    mc_sec = int(m.group(1)) * 60 + int(m.group(2))
+    half = (half or "").upper()
+    if half == "1H":
+        ko = boundaries.get("ko_1h", {}).get("seconds")
+        if ko is None: return None
+        return mc_sec + ko
+    if half == "2H":
+        ko = boundaries.get("ko_2h", {}).get("seconds")
+        if ko is None: return None
+        # 2H queue timestamps continue from 45:00 (e.g. "63m42s" = 63 min
+        # match-clock). Subtract 45 min to get into-2H seconds, then add the
+        # video-clock kickoff offset.
+        return (mc_sec - 45 * 60) + ko
+    if half in ("ET1", "ET2"):
+        # Extra time: rare. Use ko_2h as best-effort anchor; downstream
+        # consumers should refine when extra-time matches appear.
+        ko = boundaries.get("ko_2h", {}).get("seconds")
+        if ko is None: return None
+        return (mc_sec - 45 * 60) + ko
+    return None
+
+
 def build_escalation_queue(match_dir: str) -> dict:
     logs_dir = os.path.join(match_dir, "agent_logs")
 
     # Load escalation rules (config overrides > defaults)
     rules = dict(DEFAULT_ESCALATION_RULES)
     rules.update(load_config_overrides(match_dir))
+
+    # v3.0.1 bundle Task 141b: load match_boundaries once for video-clock conversion.
+    boundaries = _load_match_boundaries(match_dir)
 
     # Collect all queue items from merged window JSONs
     raw_items = []
@@ -171,9 +276,21 @@ def build_escalation_queue(match_dir: str) -> dict:
     for path in merged_paths:
         with open(path, encoding="utf-8") as f:
             w = json.load(f)
-        # "window" is set by dual-merge; single-agent merges use "agent_id"
-        window = w.get("window") or w.get("agent_id") or ""
+        # v3.0.1 bundle (Task 140): unify on agent_id as the queue's window
+        # field. Modern merged JSONs populate BOTH "window" (label like
+        # "1H_00-00_05-00") and "agent_id" (numeric like "01"). The original
+        # `window or agent_id` preference picked the label, which downstream
+        # readers (find_merged_window in pipeline_paths.py, the burst block
+        # in pipeline_runner_v2.py, and setpiece_writeback.py) cannot resolve
+        # because find_merged_window's patterns expect the numeric form. Flip
+        # the preference: agent_id wins; label kept as legacy fallback for
+        # older matches that only populated `window`.
+        window = w.get("agent_id") or w.get("window") or ""
         source = os.path.basename(path)
+        # v3.0.1 bundle Task 141b: determine which half this window covers so
+        # we can compute video-clock seconds for queue items. _infer_half
+        # walks several fallbacks: merged.half field, merged.window label,
+        # filename pattern, timestamp heuristic.
         # ARCHITECTURAL INVARIANT (F8):
         # The standalone confirmation_queue.json is the canonical source of
         # truth for confirmation state. Embedded confirmation_queue arrays
@@ -193,6 +310,11 @@ def build_escalation_queue(match_dir: str) -> dict:
         for item in w.get("confirmation_queue", []):
             item["window"] = window
             item["source"] = source
+            # v3.0.1 bundle Task 141b: video-clock for frame extraction.
+            _half = _infer_half(w, source, item.get("timestamp"))
+            item["anchor_video_s"] = _match_to_video_seconds(
+                item.get("timestamp"), _half, boundaries
+            )
             raw_items.append(item)
 
         # Auto-generate set_piece_delivery items from set_pieces[] that have
@@ -214,9 +336,15 @@ def build_escalation_queue(match_dir: str) -> dict:
             if (ts, team) in _sp_seen:
                 continue  # already queued
             _sp_seen.add((ts, team))
+            _half = _infer_half(w, source, ts)
             raw_items.append({
                 "event_type":     "set_piece_delivery",
                 "timestamp":      ts,
+                # v3.0.1 bundle Task 141b: video-clock seconds for frame
+                # extraction. None if match_boundaries.json absent or half
+                # cannot be inferred; burst block falls back to legacy
+                # _ts2s(timestamp) at that point.
+                "anchor_video_s": _match_to_video_seconds(ts, _half, boundaries),
                 "team":           team,
                 "priority":       "high",
                 "evidence_tier":  "suggestive",

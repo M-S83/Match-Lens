@@ -30,12 +30,53 @@ import glob
 
 def find_source_video(match_dir: str) -> str:
     """
-    Locate the source video file in match_dir. Expects a single .mp4 at
-    the top level. Returns the absolute path, or raises if missing/ambiguous.
+    Locate the source video file for higher-fps burst extraction.
+
+    Resolution order (v3.0.1 bundle, Task 137 Approach B):
+      1. match_config.json "video_path" field if present. Accepts an absolute
+         path OR a path relative to match_dir. Path is verified to exist.
+      2. Single .mp4 at the top level of match_dir (legacy behaviour).
+      3. Multiple .mp4 in match_dir: pick the largest with a warning.
+
+    Raises FileNotFoundError with an explicit operator-facing message when
+    neither resolves -- the message names BOTH paths the operator could fix.
+
+    Why this matters: operator-provided footage often lives in a working
+    directory outside Match Lens Jobs/, and copying a 1-2 GB video into every
+    match dir per run is wasteful + error-prone. The video_path field lets the
+    operator point the pipeline at the original file without moving it.
     """
+    import json
+    config_path = os.path.join(match_dir, "match_config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                mc = json.load(f)
+            vp = mc.get("video_path")
+            if vp:
+                # Absolute path OR relative to match_dir
+                resolved = vp if os.path.isabs(vp) else os.path.join(match_dir, vp)
+                if os.path.exists(resolved):
+                    return resolved
+                # Configured but missing -- surface clearly rather than fall
+                # through silently to legacy match-dir search.
+                raise FileNotFoundError(
+                    f"match_config.video_path is set to {vp!r} but the file "
+                    f"does not exist (resolved to {resolved!r}). Update "
+                    f"match_config.json or place the video at the expected "
+                    f"path."
+                )
+        except (OSError, json.JSONDecodeError):
+            # match_config unreadable -- silently fall through to legacy search
+            pass
+
     candidates = sorted(glob.glob(os.path.join(match_dir, "*.mp4")))
     if not candidates:
-        raise FileNotFoundError(f"No .mp4 found in {match_dir}")
+        raise FileNotFoundError(
+            f"No source video found for {match_dir}. Either set "
+            f"match_config.video_path to the absolute path of the source "
+            f"video, or copy/symlink the .mp4 into the match directory."
+        )
     if len(candidates) > 1:
         # Multiple videos -- pick the largest (typically the full match) and
         # warn rather than failing. Common case: clip files alongside main video.

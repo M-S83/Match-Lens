@@ -52,12 +52,34 @@ def apply_burst_to_record(record: dict, burst: dict) -> tuple:
     Patch the set_piece record in place with burst output.
     Returns (changed_fields, corrections_logged).
     Idempotent: if burst_resolved is already True, skips re-application.
+
+    Status-aware (v3.0.1 bundle): when burst.status == "inconclusive", do
+    NOT merge confirmed_fields or burst_fields. Instead mark the 1fps record
+    with burst_verdict + burst_rejection_reason so downstream consumers
+    (synthesis, report writers) can treat the original 1fps emission with
+    appropriate suspicion. This is the architectural escape that lets the
+    5fps burst surface upstream 1fps fabrications without baking them into
+    the merged dataset.
     """
     if record.get("burst_resolved"):
         return [], []
 
+    # Inconclusive verdict: do not merge field data; flag for downstream suspicion.
+    burst_status = burst.get("status")
+    if burst_status == "inconclusive":
+        rejection = burst.get("rejection_reason") or "(no reason provided)"
+        record["burst_verdict"]          = "inconclusive"
+        record["burst_rejection_reason"] = rejection
+        record["burst_fps"]              = burst.get("burst_fps", 5)
+        record["burst_resolved"]         = True
+        record["resolved_at"]            = datetime.utcnow().isoformat() + "Z"
+        return ["burst_verdict", "burst_rejection_reason"], []
+
     changed = []
     corrections_logged = []
+
+    # Default behaviour (status="confirmed" or absent — legacy bursts):
+    # merge confirmed_fields + burst_fields per existing logic.
 
     # Confirmation fields: write burst value, log if it differs from 1fps
     confirmed = burst.get("confirmed_fields", {})
@@ -89,6 +111,7 @@ def apply_burst_to_record(record: dict, burst: dict) -> tuple:
 
     # Audit trail
     record["burst_resolved"] = True
+    record["burst_verdict"]  = "confirmed"  # explicit (paired with the inconclusive branch above)
     record["burst_fps"]      = burst.get("burst_fps", 5)
     record["source"]         = "1fps_plus_5fps_burst"
     record["corrections"]    = record.get("corrections", []) + corrections_logged

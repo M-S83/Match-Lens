@@ -149,6 +149,25 @@ def find_merged_window(logs_dir: str, window_id):
         if matches:
             matches.sort(key=lambda p: len(os.path.basename(p)))
             return matches[0]
+
+    # v3.0.1 bundle (Task 140): defensive label-format fallback. Older /
+    # in-flight queues may carry the label form (e.g. "1H_00-00_05-00",
+    # "2H_45-00_50-00") as their window_id instead of the canonical agent_id
+    # ("01", "12"). The patterns above won't match because the label is
+    # embedded mid-filename, not in the leading agent_NN position. Recognize
+    # the half-prefixed label pattern and add the matching glob.
+    if isinstance(window_id, str) and (
+        window_id.startswith("1H_")
+        or window_id.startswith("2H_")
+        or window_id.startswith("ET1_")
+        or window_id.startswith("ET2_")
+    ):
+        label_pattern = f"agent_*_{window_id}_merged.json"
+        matches = glob.glob(os.path.join(logs_dir, label_pattern))
+        if matches:
+            matches.sort(key=lambda p: len(os.path.basename(p)))
+            return matches[0]
+
     return None
 
 

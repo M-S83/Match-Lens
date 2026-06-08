@@ -648,7 +648,10 @@ def update_running_summary(merged_path: str,
             summary["temperament_observations"].append(obs_with_window)
 
     # Set pieces: validate timestamps + types, reject invalid entries, auto-queue valid ones
-    _window_id = w.get("window") or w.get("agent_id")
+    # v3.0.1 bundle (Task 140): prefer agent_id over label to match the
+    # downstream find_merged_window lookup format. See the matching flip in
+    # escalation_router.py for the full rationale.
+    _window_id = w.get("agent_id") or w.get("window")
     _valid_sps   = []
     _rejected_sps = []
     _queue_entries = []
