@@ -39,6 +39,79 @@ from pipeline_schemas import stamp_schema_version
 from datetime import datetime
 
 
+# v3.0.1 polish Task 144: fields the player agent canonically owns.
+# These are loaded from agent_NN_player.json and folded into the merged
+# window output ALONGSIDE the structural agent's fields. Pre-fix the
+# player file was treated as a fallback for the structural input rather
+# than as an additive third input, so these fields were silently
+# absent from every merged window on modern v3 matches — which made
+# running_summary.individual_observations stay [] and player_summary_cards
+# render with empty content despite Step 17 file-existence checks passing.
+PLAYER_AGENT_FIELDS = (
+    "individual_observations",
+    "duels",
+    "player_escalation_queue",
+    "watch_list_confirmations",
+    "top_observations_for_next_window",
+)
+
+
+def _load_player_file(logs_dir: str, wid) -> dict:
+    """v3.0.1 polish Task 144: load the player-agent output for a window
+    and return its parsed dict, or {} if missing/unreadable. Reads via
+    find_agent_output's canonical multi-pattern lookup, so it tolerates
+    every batch_runner / merge_utils filename variant the runner has used
+    historically.
+
+    Returns {} (not None) so call sites can safely .get(field, []) on the
+    result without a guarding conditional.
+    """
+    path = _find_agent_file(logs_dir, wid, "player")
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f) or {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _fold_player_fields(merged: dict, player: dict) -> None:
+    """v3.0.1 polish Task 144: fold the player-agent output's canonical
+    fields into the merged-window dict in place.
+
+    Semantics per field:
+      - individual_observations: APPENDED to whatever the structural side
+        emitted (structural rarely emits any). The accumulator's player-
+        tendency loop reads from merged.individual_observations.
+      - duels: APPENDED. Same rationale.
+      - player_escalation_queue: OVERWRITTEN if the player file emits a
+        non-empty list (player-agent canonical; structural doesn't emit it).
+      - watch_list_confirmations: OVERWRITTEN (same).
+      - top_observations_for_next_window: OVERWRITTEN (same).
+
+    A player file with empty lists is preserved as empty (not skipped) so
+    downstream consumers see a uniform shape.
+    """
+    if not player:
+        return
+    # Append-only fields: combine with whatever structural side already had.
+    for fld in ("individual_observations", "duels"):
+        src_list = player.get(fld) or []
+        if not isinstance(src_list, list):
+            continue
+        existing = merged.get(fld) or []
+        if not isinstance(existing, list):
+            existing = []
+        merged[fld] = existing + src_list
+    # Overwrite fields: player agent is the canonical owner.
+    for fld in ("player_escalation_queue",
+                "watch_list_confirmations",
+                "top_observations_for_next_window"):
+        if fld in player:
+            merged[fld] = player[fld]
+
+
 # -- Numeric and categorical merge helpers -------------------------------------
 
 def merge_numeric(a, b):
@@ -130,13 +203,32 @@ def stamp_gates_on_findings(findings: list, gates: dict,
 # -- Single-agent merge --------------------------------------------------------
 
 def merge_single_agent(a_path: str, out_path: str,
-                       agent_id: str, match_dir: str) -> dict:
+                       agent_id: str, match_dir: str,
+                       player_path: str = None) -> dict:
     """
     Routine window merge: apply re-run patches and write as merged.
     No consensus layer -- single agent output is the source of truth.
+
+    v3.0.1 polish Task 144: optional player_path. When provided, the
+    player file's canonical fields (individual_observations, duels,
+    player_escalation_queue, watch_list_confirmations,
+    top_observations_for_next_window) are folded into the merged output
+    alongside the structural agent's fields. Pre-fix the merge step only
+    ever consumed the structural file, so player-agent fields were
+    silently absent from every merged window and downstream consumers
+    (accumulator, player_aggregator) saw empty inputs.
     """
     with open(a_path, encoding="utf-8") as f:
         a = json.load(f)
+
+    # v3.0.1 polish Task 144: load player file if available.
+    player = {}
+    if player_path and os.path.exists(player_path):
+        try:
+            with open(player_path, encoding="utf-8") as _f:
+                player = json.load(_f) or {}
+        except (OSError, json.JSONDecodeError):
+            player = {}
 
     patches = load_rerun_patches(a.get("agent_id", agent_id), match_dir)
     if patches:
@@ -171,24 +263,50 @@ def merge_single_agent(a_path: str, out_path: str,
     # reader hits the same None-propagation pattern dual_agent had.
     a["window"]       = _derive_window_label(out_path)
 
+    # v3.0.1 polish Task 144: fold the player agent's canonical fields
+    # into the merged dict before writing.
+    _fold_player_fields(a, player)
+
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(stamp_schema_version(a, "agent_merged"), f, indent=2)
 
+    n_obs = len(a.get("individual_observations") or [])
+    n_duels = len(a.get("duels") or [])
     print(f"  [{agent_id}] Single -> {os.path.basename(out_path)}"
-          f" | patches: {len(patches)}")
+          f" | patches: {len(patches)}"
+          f" | player-fold: obs={n_obs} duels={n_duels}")
     return a
 
 
 # -- Dual-agent merge ----------------------------------------------------------
 
 def merge_dual_agents(a_path: str, b_path: str, out_path: str,
-                      agent_id: str, match_dir: str) -> dict:
+                      agent_id: str, match_dir: str,
+                      player_path: str = None) -> dict:
     """
     Event window merge: two independent agents, consensus layer, disagreement log.
     The merged output reflects the best available reading from both agents.
+
+    v3.0.1 polish Task 144: optional player_path. Same semantics as
+    merge_single_agent — player file is an additive third input whose
+    canonical fields (individual_observations, duels, etc.) get folded
+    into the merged output. The explicit allowlist that builds the merged
+    dict (around line 400) was missing gk_distribution + far_side_shape;
+    those are now added so structural-only fields survive the event-window
+    merge path. Pre-fix, event windows (~45% of matches) silently dropped
+    every GK distribution event the structural agent recorded.
     """
     with open(a_path, encoding="utf-8") as f: a = json.load(f)
     with open(b_path, encoding="utf-8") as f: b = json.load(f)
+
+    # v3.0.1 polish Task 144: load player file if available.
+    player = {}
+    if player_path and os.path.exists(player_path):
+        try:
+            with open(player_path, encoding="utf-8") as _f:
+                player = json.load(_f) or {}
+        except (OSError, json.JSONDecodeError):
+            player = {}
 
     # Apply re-run patches to both
     patches_a = load_rerun_patches(a.get("agent_id", agent_id + "a"), match_dir)
@@ -404,7 +522,20 @@ def merge_dual_agents(a_path: str, b_path: str, out_path: str,
         "attacking":               a.get("attacking", {}),
         "defensive":               a.get("defensive", {}),
         "key_moments":             merged_moments,
-        "individual_observations": a.get("individual_observations", []),
+        # v3.0.1 polish Task 144: individual_observations is appended-to
+        # by _fold_player_fields below. Starting empty here means a
+        # structural-only event window with no player file still produces
+        # a valid empty-list field; running both inputs (the common case)
+        # produces the player agent's observations.
+        "individual_observations": [],
+        "duels":                   [],
+        # v3.0.1 polish Task 144: structural-only fields that the pre-fix
+        # allowlist silently dropped. gk_distribution drove the ~45% GK
+        # event drop on event windows (Task 122 diagnosis); far_side_shape
+        # similarly absent for broadcast / dual-camera matches.
+        "gk_distribution":         a.get("gk_distribution", []) +
+                                   b.get("gk_distribution", []),
+        "far_side_shape":          a.get("far_side_shape", b.get("far_side_shape")),
         "flaggable_moments":       a.get("flaggable_moments", []) +
                                    b.get("flaggable_moments", []),
         "possession_summary":      a.get("possession_summary", {}),
@@ -429,12 +560,21 @@ def merge_dual_agents(a_path: str, b_path: str, out_path: str,
         "merged_at": datetime.now().isoformat(),
     }
 
+    # v3.0.1 polish Task 144: fold the player agent's canonical fields
+    # into the merged dict. Done after dict construction so the helper
+    # can append to individual_observations/duels (already seeded as []
+    # above) and overwrite player-canonical fields cleanly.
+    _fold_player_fields(merged, player)
+
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(stamp_schema_version(merged, "agent_merged"), f, indent=2)
 
     issues = len(review_required)
+    n_obs = len(merged.get("individual_observations") or [])
+    n_gk  = len(merged.get("gk_distribution") or [])
     print(f"  [{agent_id}] Dual   -> {os.path.basename(out_path)}"
           f" | issues: {issues}"
+          f" | player-fold: obs={n_obs} | gk_dist: {n_gk}"
           + (f" [!] review needed" if issues else ""))
 
     if review_required:
@@ -502,9 +642,22 @@ def merge_all_windows(match_dir: str) -> dict:
             if os.path.exists(legacy_b):
                 b_file = legacy_b
 
+        # v3.0.1 polish Task 144: player file is an ADDITIVE third input,
+        # not a fallback for Agent A. Pre-fix the lookup above only used
+        # the player file when no structural file existed, which is almost
+        # never on modern v3 matches — so individual_observations / duels /
+        # player_escalation_queue never reached merged windows and
+        # player_summary_cards rendered empty content.
+        # Only treat as third input if it's not already being used as
+        # Agent A's fallback (i.e. structural was found).
+        p_file = None
+        if a_file and "structural" in os.path.basename(a_file):
+            p_file = _find_agent_file(logs_dir, wid, "player")
+
         if w.get("event_window") and b_file and os.path.exists(b_file):
             try:
-                merge_dual_agents(a_file, b_file, out_file, agent_id, match_dir)
+                merge_dual_agents(a_file, b_file, out_file, agent_id,
+                                  match_dir, player_path=p_file)
                 merged += 1
             except Exception as e:
                 errors.append(f"[{agent_id}] Dual merge failed: {e}")
@@ -514,7 +667,8 @@ def merge_all_windows(match_dir: str) -> dict:
                 print(f"  [{agent_id}] [!] Event window but no Agent B -- "
                       f"falling back to single agent")
             try:
-                merge_single_agent(a_file, out_file, agent_id, match_dir)
+                merge_single_agent(a_file, out_file, agent_id,
+                                   match_dir, player_path=p_file)
                 merged += 1
             except Exception as e:
                 errors.append(f"[{agent_id}] Single merge failed: {e}")

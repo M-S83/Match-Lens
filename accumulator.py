@@ -1301,7 +1301,19 @@ def _accumulate_player_tendencies(logs_dir: str, mc: dict) -> dict:
                 # cannot accumulate across windows by name.
                 continue
 
-            t = tendencies[player_name]
+            # v3.0.1 polish Task 144: strip the "(#NN)" shirt-number suffix
+            # before keying. The player agent prompt emits names with the
+            # suffixed form ("Travis Canham (#13)") while the gk_distribution
+            # loop further down (line ~1422-1443) keys on the clean form
+            # ("Travis Canham") from match_config.startXI. Pre-fix the two
+            # produced separate dict entries for the same player, leaving
+            # one row with positioning-only and one row with gk-only data.
+            # Pattern matches the existing _resolve_player strip at line 1246.
+            canonical_name = (
+                _re.sub(r'\s*\(#\d+\)\s*$', '', player_name).strip()
+                or player_name
+            )
+            t = tendencies[canonical_name]
             t["windows_appeared"] += 1
 
             # Fix 55: resolve via _resolve_player to handle the
