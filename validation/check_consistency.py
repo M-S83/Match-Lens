@@ -76,6 +76,11 @@ def check(summary):
     def note(msg):
         out["findings"].append("note  " + msg)
 
+    def unverifiable(msg):
+        # a check the gate COULD NOT run -- must NEVER be silently treated as a pass
+        out["findings"].append("UNVERIFIABLE  " + msg)
+        out.setdefault("unverifiable", []).append(msg)
+
     home = summary.get("home_team", "home_team")
     away = summary.get("away_team", "away_team")
     km = summary.get("key_moments", [])
@@ -174,21 +179,18 @@ def check(summary):
         half, start = mm.group(1), int(mm.group(2))
         return start if half == "1H" else 45 + start
 
-    rows, disagree = [], 0
+    rows, disagree, n_placeable = [], 0, 0
     for w in msw:
         label = w.get("window", "")
         amin = window_abs_min(label)
+        if amin is not None:
+            n_placeable += 1
         claimed = w.get("match_state")
         implied = implied_state_at(amin) if amin is not None else None
         # only compare when we have both; 'winning' label may be either side
         ok = None
-        if implied is not None and claimed is not None:
-            # normalise: report uses level/home_winning/away_winning/... compare directly,
-            # but tolerate a bare 'winning' by checking only level-vs-not when ambiguous
-            if claimed in ("home_winning", "away_winning", "level"):
-                ok = (claimed == implied)
-            else:
-                ok = None
+        if implied is not None and claimed is not None and claimed in ("home_winning", "away_winning", "level"):
+            ok = (claimed == implied)
         if ok is False:
             disagree += 1
         rows.append({"window": label, "claimed": claimed, "implied_by_own_goals": implied, "match": ok})
@@ -198,8 +200,18 @@ def check(summary):
         fail(f"MATCH-STATE: {disagree}/{len(comparable)} comparable windows disagree with the "
              f"report's OWN goal log. The report's per-window lead contradicts the lead its own "
              f"goals imply -- internal contradiction (no external truth needed).")
+    # The gate must NEVER silently pass a check it could not run. If no window carries a
+    # parseable time label, match_state cannot be placed against the goal log -> say so LOUD.
+    if msw and n_placeable == 0:
+        unverifiable(f"MATCH-STATE: 0/{len(msw)} windows have a parseable time label (the 'window' "
+                     f"field is absent/unrecognised), so match_state could NOT be checked against "
+                     f"the goal log. This is NOT a pass on this invariant.")
+    elif 0 < n_placeable < len(msw):
+        note(f"MATCH-STATE: only {n_placeable}/{len(msw)} windows had a parseable time label; "
+             f"the remaining {len(msw) - n_placeable} were unplaceable and NOT checked.")
     out["match_state"] = {
         "windows": len(msw),
+        "placeable": n_placeable,
         "comparable": len(comparable),
         "disagreeing": disagree,
         "candidate_causes_NOT_adjudicated": [
@@ -254,7 +266,13 @@ def check(summary):
 def render(out):
     L = ["=" * 72, "TIER-1 INTERNAL-CONSISTENCY CHECK  (no ground truth)",
          f"Report: {out['fixture']}", "=" * 72, ""]
-    verdict = "PASS -- no self-contradiction found" if out["ok"] else "FAIL -- internal contradiction(s) found"
+    if not out["ok"]:
+        verdict = "FAIL -- internal contradiction(s) found"
+    elif out.get("unverifiable"):
+        verdict = ("INCOMPLETE -- no contradiction found, but a check could NOT be run "
+                   "(see UNVERIFIABLE below). This is NOT a clean pass.")
+    else:
+        verdict = "PASS -- no self-contradiction found"
     L.append(f"VERDICT: {verdict}")
     L.append("")
     L.append("FINDINGS:")
@@ -316,8 +334,10 @@ def main():
     (outpath.parent / "consistency_result.txt").write_text(rendered, encoding="utf-8")
     print(f"\nwrote {outpath} (+ .txt)")
 
-    # exit code makes this usable as an acceptance test (0=pass, 1=fail)
-    sys.exit(0 if out["ok"] else 1)
+    # exit code makes this usable as an acceptance test:
+    #   0 = clean pass, 1 = contradiction found,
+    #   2 = no contradiction but a check could NOT be run (unverifiable -- not a clean pass)
+    sys.exit(1 if not out["ok"] else (2 if out.get("unverifiable") else 0))
 
 
 if __name__ == "__main__":
