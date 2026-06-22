@@ -86,8 +86,10 @@ def selfcheck(gt):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default=None, help="local statsbomb/open-data clone (optional; fetches if omitted)")
-    ap.add_argument("--out", default="validation/groundtruth")
+    ap.add_argument("--out", default=None,
+                    help="default: the groundtruth/ dir this script lives in (CWD-robust)")
     a = ap.parse_args()
+    a.out = a.out or str(Path(__file__).resolve().parent)
     gt = extract(load("events", a.data_dir), load("lineups", a.data_dir), load("matches", a.data_dir))
     selfcheck(gt)
     outdir = Path(a.out); outdir.mkdir(parents=True, exist_ok=True)
