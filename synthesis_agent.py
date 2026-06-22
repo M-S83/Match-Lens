@@ -883,7 +883,7 @@ def _call_synthesis(system_prompt: str, user_content: str,
     """Single API call for synthesis. Returns full text response."""
     client = anthropic.Anthropic()
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=max_tokens,
         system=system_prompt,
         messages=[{"role": "user", "content": user_content}],

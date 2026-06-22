@@ -2733,7 +2733,7 @@ def run_pipeline(match_dir: str, quality: str = "standard",
                 prompt = build_tactical_prompt(match_dir, mc, report_level)
                 client = _anthropic.Anthropic()
                 response = client.messages.create(
-                    model="claude-sonnet-4-20250514",
+                    model="claude-sonnet-4-6",
                     max_tokens=8192,
                     messages=[{"role": "user", "content": prompt}]
                 )
@@ -2754,7 +2754,7 @@ def run_pipeline(match_dir: str, quality: str = "standard",
                                                  mc.get("home_team", ""), report_level)
                 client = _anthropic.Anthropic()
                 response = client.messages.create(
-                    model="claude-sonnet-4-20250514",
+                    model="claude-sonnet-4-6",
                     max_tokens=8192,
                     messages=[{"role": "user", "content": prompt}]
                 )

@@ -925,7 +925,13 @@ def load_pipeline_data(match_dir):
 
 
 def get_gate(family, gates):
-    return gates.get("gates", {}).get(family, "downgraded")
+    g = gates.get("gates", {}).get(family, "downgraded")
+    # Canonical result_family_gates.json stores each gate as
+    # {"status": "...", "note": ...}. Older/flat files store a bare string.
+    # Return the status string in both cases (callers compare/key on a string).
+    if isinstance(g, dict):
+        return g.get("status", "downgraded")
+    return g
 
 
 def worst_evidence_tier(tiers):

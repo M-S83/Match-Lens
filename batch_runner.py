@@ -25,8 +25,8 @@ from pipeline_state import mark_window, store_batch_id
 from pipeline_schemas import stamp_schema_version
 
 
-MODEL       = "claude-sonnet-4-20250514"
-MAX_TOKENS  = 4096
+MODEL       = "claude-sonnet-4-6"
+MAX_TOKENS  = 16384
 POLL_SECS   = 60       # poll every 60 seconds
 MAX_POLLS   = 240      # 4 hours max wait
 

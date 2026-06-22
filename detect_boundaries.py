@@ -119,7 +119,7 @@ BOUNDARY_KEYS = ("ko_1h", "ht_whistle", "ko_2h", "ft_whistle")
 
 def encode_image(path: str) -> tuple[str, str]:
     """Load image via Pillow, resize to IMG_MAX_WIDTH px wide, encode as base64 JPEG."""
-    img = Image.open(path, encoding="utf-8").convert("RGB")
+    img = Image.open(path).convert("RGB")
     if img.width > IMG_MAX_WIDTH:
         ratio = IMG_MAX_WIDTH / img.width
         img   = img.resize((IMG_MAX_WIDTH, int(img.height * ratio)), Image.LANCZOS)

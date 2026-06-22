@@ -249,7 +249,7 @@ def preprocess_window(match_dir: str, window_id: str,
     for i, fpath in enumerate(all_frames):
         fname = os.path.basename(fpath)
         try:
-            img = Image.open(fpath, encoding="utf-8").convert("RGB")
+            img = Image.open(fpath).convert("RGB")
         except Exception:
             stats["blurry"] += 1
             continue
