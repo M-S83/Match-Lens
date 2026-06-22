@@ -37,3 +37,13 @@ output/
 
 # Exemplar style templates — local only, may contain real match data
 exemplars/
+
+# Validation harness
+# Quarantined ground-truth DATA — one-way valve. Regenerable via the extractor
+# (statsbomb_groundtruth.py, which IS versioned). Never committed to the pipeline repo.
+validation/groundtruth/*.json
+ground_truth_*.json
+# Generated result artifacts — keep the dir, not its contents
+validation/outputs/*
+!validation/outputs/.gitkeep
+!validation/groundtruth/.gitkeep

@@ -292,8 +292,12 @@ def render(out):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--summary", required=True, help="running_summary.json (the ONLY input)")
-    ap.add_argument("--out", default="validation/outputs/consistency_result.json")
+    ap.add_argument("--out", default=None,
+                    help="default: <this script dir>/outputs/consistency_result.json")
     a = ap.parse_args()
+
+    out_default = Path(__file__).resolve().parent / "outputs" / "consistency_result.json"
+    a.out = a.out or str(out_default)
 
     summary = json.loads(Path(a.summary).read_text(encoding="utf-8"))
 
