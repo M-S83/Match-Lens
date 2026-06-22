@@ -1539,6 +1539,144 @@ def _accumulate_player_tendencies(logs_dir: str, mc: dict) -> dict:
     }
 
 
+def reconcile_goals_and_state(summary, config):
+    """Reconcile the goal log and derive match_state from the resulting ledger.
+
+    Fixes the accumulator never-reconcile defect: footage goals were concatenated
+    into key_moments with no dedup (one goal seen in adjacent windows logged twice),
+    and match_state_by_window was an independent per-window scoreboard read that
+    could contradict the goal log.
+
+    Operator facts authoritative when present (config['goals'] non-empty):
+      canonical goals = the operator's; footage goals with no operator match are
+      rejected (likely disallowed/phantom); operator goals not detected are flagged
+      missed. This is the service-product path -- the club supplies the facts.
+    Otherwise (blind / no operator facts): internal-consistency transition-dedup --
+      collapse footage goals that re-name an already-reached scoreline, preserving
+      both candidate minutes (timestamp left unresolved).
+
+    Always: derive match_state_by_window from the canonical ledger (keeping the raw
+    per-window read as match_state_raw_read), and preserve everything dropped in
+    summary['goal_reconciliation']. Behaviour-preserving when there are no
+    duplicate/phantom goals and no operator facts.
+    """
+    import re
+
+    def parse_minute(s):
+        if s is None: return None
+        if isinstance(s, int): return s
+        m = re.match(r"(\d+)[m:](\d+)", str(s))
+        return int(m.group(1)) if m else None
+
+    def window_abs_min(label):
+        mm = re.match(r"(1H|2H)_(\d+)", label or "")
+        if not mm: return None
+        half, start = mm.group(1), int(mm.group(2))
+        return start if half == "1H" else 45 + start
+
+    def kit_to_team(kit):
+        if kit == "home_kit": return summary.get("home_team", "home_kit")
+        if kit == "away_kit": return summary.get("away_team", "away_kit")
+        return kit
+
+    def norm_team(t):
+        if t in ("home", "home_kit"): return summary.get("home_team")
+        if t in ("away", "away_kit"): return summary.get("away_team")
+        return t
+
+    def mentioned_totals(desc):
+        return {int(x) + int(y) for x, y in
+                re.findall(r"(?<!\d)(?<!\d[-–])(\d)\s*[-–]\s*(\d)(?!\s*[-–]\s*\d)", desc or "")}
+
+    home = summary.get("home_team", "home_team")
+    away = summary.get("away_team", "away_team")
+    km = summary.get("key_moments", [])
+    footage = [k for k in km if k.get("type") == "goal"]
+    op_goals = (config or {}).get("goals", []) or []
+    canonical, rejected, missed = [], [], []
+
+    if op_goals:
+        method = "operator_facts_authoritative"
+        used = [False] * len(footage)
+        for o in op_goals:
+            ot, om = norm_team(o.get("team")), parse_minute(o.get("minute"))
+            hit = None
+            for i, fg in enumerate(footage):
+                if used[i] or kit_to_team(fg.get("team")) != ot:
+                    continue
+                fm = parse_minute(fg.get("minute"))
+                if om is None or fm is None or abs(fm - om) <= 8:
+                    hit = i
+                    break
+            cg = {"team": ot, "minute": (f"{om:02d}:00" if om is not None else None),
+                  "source": "operator", "detected_in_footage": hit is not None}
+            if hit is not None:
+                used[hit] = True
+                cg["footage_minute"] = parse_minute(footage[hit].get("minute"))
+            else:
+                missed.append({"team": ot, "minute": om, "note": "operator goal not detected in footage"})
+            canonical.append(cg)
+        for i, fg in enumerate(footage):
+            if not used[i]:
+                rejected.append({"team": kit_to_team(fg.get("team")), "minute": parse_minute(fg.get("minute")),
+                                 "note": "footage goal with no matching operator goal (likely disallowed/phantom)"})
+    else:
+        method = "internal_consistency_transition_dedup"
+        h = a = 0
+        for g in sorted(footage, key=lambda g: (parse_minute(g.get("minute"))
+                                                if parse_minute(g.get("minute")) is not None else 10 ** 9)):
+            t = kit_to_team(g.get("team"))
+            exp_total = h + a + 1
+            mt = mentioned_totals(g.get("description", ""))
+            if mt and exp_total not in mt and any(x < exp_total for x in mt):
+                prev = next((c for c in reversed(canonical) if c["team"] == t), None)
+                if prev is not None:
+                    prev.setdefault("candidate_minutes", [prev["minute"]]).append(g.get("minute"))
+                    prev["resolved"] = False
+                    rejected.append({"team": t, "minute": g.get("minute"),
+                                     "note": "duplicate scoreline transition (collapsed; timestamp unresolved)"})
+                    continue
+            if t == home: h += 1
+            elif t == away: a += 1
+            canonical.append({"team": t, "minute": g.get("minute"), "source": "footage", "resolved": True})
+
+    non_goals = [k for k in km if k.get("type") != "goal"]
+    canon_km = []
+    for c in canonical:
+        e = {"type": "goal", "team": c["team"], "minute": c.get("minute"), "source": c.get("source")}
+        if c.get("candidate_minutes"):
+            e["candidate_minutes"] = c["candidate_minutes"]
+            e["resolved"] = False
+        if "detected_in_footage" in c:
+            e["detected_in_footage"] = c["detected_in_footage"]
+        canon_km.append(e)
+    summary["key_moments"] = non_goals + canon_km
+    summary["goal_reconciliation"] = {
+        "method": method,
+        "operator_facts_used": bool(op_goals),
+        "canonical_goals": [{"team": c["team"], "minute": c.get("minute")} for c in canonical],
+        "rejected_footage_goals": rejected,
+        "missed_by_footage": missed,
+    }
+
+    lead = sorted(((parse_minute(c.get("minute")) or 0), c["team"]) for c in canonical)
+
+    def implied(absmin):
+        h = a = 0
+        for m, t in lead:
+            if m is not None and m <= absmin:
+                if t == home: h += 1
+                elif t == away: a += 1
+        return "home_winning" if h > a else ("away_winning" if a > h else "level")
+
+    for w in summary.get("match_state_by_window", []):
+        w["match_state_raw_read"] = w.get("match_state")
+        am = window_abs_min(w.get("window", ""))
+        if am is not None:
+            w["match_state"] = implied(am)
+    return summary
+
+
 def accumulate_all_windows(match_dir: str) -> dict:
     """
     Process all merged window JSONs in agent_logs/.
@@ -1685,6 +1823,19 @@ def accumulate_all_windows(match_dir: str) -> dict:
             print(f"  Far-side shape: {far_side_summary['windows_with_data']} windows with data")
         else:
             print(f"  Far-side shape: not available for this source type")
+
+    # Reconcile goal log + derive match_state from the ledger (operator facts
+    # authoritative when present, internal-consistency dedup always). Fixes the
+    # never-reconcile defect; preserves dropped goals in goal_reconciliation.
+    with open(summary_path, encoding="utf-8") as f:
+        _rsum = json.load(f)
+    _rsum = reconcile_goals_and_state(_rsum, mc)
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(stamp_schema_version(_rsum, "running_summary"), f, indent=2)
+    _gr = _rsum.get("goal_reconciliation", {})
+    print(f"  Goal reconcile: {len(_gr.get('canonical_goals', []))} canonical "
+          f"({_gr.get('method')}); {len(_gr.get('rejected_footage_goals', []))} rejected, "
+          f"{len(_gr.get('missed_by_footage', []))} missed")
 
     # Final counts
     with open(summary_path, encoding="utf-8") as f:
