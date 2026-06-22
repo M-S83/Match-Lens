@@ -722,7 +722,9 @@ def update_running_summary(merged_path: str,
     _focus_pct  = round(_home_seqs / max(_total_both, 1) * 100, 1) if _total_both > 0 else None
     summary["possession_by_window"].append({
         "window":     w.get("window"),
-        "summary":    w.get("possession_summary", {}),
+        # NB: dropped the dead "summary" slot -- it read w['possession_summary'],
+        # which structural agents never emit (always {}); the real possession data
+        # is in focus_pct/focus_seqs/opp_seqs/basis below, which consumers already use.
         "focus_pct":  _focus_pct,
         "focus_seqs": _home_seqs,
         "opp_seqs":   _away_seqs,

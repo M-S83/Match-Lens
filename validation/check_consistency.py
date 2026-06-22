@@ -247,8 +247,7 @@ def check(summary):
         vals = [w.get(field) for w in arr]
         empty = sum(1 for v in vals if v in (None, "", [], {}))
         return empty, len(vals)
-    for arr_name, field in [("pressing_by_window", "observations"),
-                            ("possession_by_window", "summary")]:
+    for arr_name, field in [("pressing_by_window", "observations")]:
         arr = summary.get(arr_name, [])
         if arr:
             e, n = empty_rate(arr, field, None)
