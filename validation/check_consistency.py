@@ -256,10 +256,15 @@ def check(summary):
                 note(f"LOSSY-SUMMARY: {arr_name}[].{field} empty in {e}/{n} windows -- "
                      f"dead summary slot (data may exist upstream; summary drops it).")
     spr = summary.get("set_pieces_rejected", None)
-    if isinstance(spr, list) and len(spr) == 0:
-        note("LOSSY-SUMMARY: set_pieces_rejected is empty in the summary. If per-burst "
-             "*_setpiece.json files show rejections, the summary UNDER-COUNTS them -- read "
-             "burst files for the true filter signal, not this field.")
+    spf = summary.get("set_piece_filter_summary")
+    if isinstance(spf, dict) and spf.get("available"):
+        note(f"SET-PIECE FILTER: {spf.get('confirmed')}/{spf.get('bursts_run')} bursts confirmed, "
+             f"{spf.get('not_confirmed')} not-confirmed ({spf.get('distinct_rejection_reasons')} distinct "
+             f"reasons) -- filter existence IS observable here (set_piece_filter_summary). "
+             f"set_pieces_rejected is schema-validation only.")
+    elif isinstance(spr, list) and len(spr) == 0:
+        note("LOSSY-SUMMARY: set_pieces_rejected is empty AND no set_piece_filter_summary -- "
+             "the burst filter signal is not surfaced; read per-burst *_setpiece.json files.")
 
     return out
 

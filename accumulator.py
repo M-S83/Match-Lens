@@ -1722,6 +1722,54 @@ def reconcile_goals_and_state(summary, config):
     return summary
 
 
+def _accumulate_setpiece_verdicts(logs_dir):
+    """Surface the set-piece BURST filter signal in the summary.
+
+    The 5fps burst agents confirm or reject each escalated set-piece candidate
+    (status = confirmed / inconclusive, with a rejection_reason), but those verdicts
+    live ONLY in the per-burst *_setpiece.json files. The summary's
+    set_pieces_rejected reflects schema-VALIDATION rejections, not the burst filter --
+    so the summary looks like the filter never rejects anything (rubber-stamping),
+    when the burst files show it discriminating. This makes claims-seen vs
+    claims-confirmed visible on disk: the one path where filter existence is observable.
+    """
+    files = sorted(glob.glob(os.path.join(logs_dir, "*_setpiece.json")))
+    if not files:
+        return {"available": False, "note": "no set-piece burst files"}
+    by_status, reasons, per_burst = {}, [], []
+    for f in files:
+        try:
+            with open(f, encoding="utf-8") as fh:
+                d = json.load(fh)
+        except Exception:
+            continue
+        st = d.get("status") or "unknown"
+        by_status[st] = by_status.get(st, 0) + 1
+        rr = d.get("rejection_reason")
+        if rr:
+            reasons.append(rr)
+        per_burst.append({"timestamp": d.get("anchor_timestamp") or d.get("timestamp"),
+                          "team": d.get("team"), "window": d.get("window"),
+                          "status": st, "rejection_reason": rr})
+    n = len(per_burst)
+    confirmed = by_status.get("confirmed", 0)
+    return {
+        "available": True,
+        "bursts_run": n,
+        "by_status": by_status,
+        "confirmed": confirmed,
+        "not_confirmed": n - confirmed,
+        "confirm_rate": round(confirmed / n, 2) if n else None,
+        "distinct_rejection_reasons": len(set(reasons)),
+        "rejection_reasons_sample": list(dict.fromkeys(reasons))[:5],
+        "per_burst": per_burst,
+        "note": ("claims-seen vs claims-confirmed for the set-piece filter -- the one path "
+                 "where filter existence is observable. not_confirmed>0 with distinct reasons "
+                 "= the filter discriminates (not rubber-stamping). Read this, not "
+                 "set_pieces_rejected (which is schema-validation rejections only)."),
+    }
+
+
 def accumulate_all_windows(match_dir: str) -> dict:
     """
     Process all merged window JSONs in agent_logs/.
@@ -1876,6 +1924,7 @@ def accumulate_all_windows(match_dir: str) -> dict:
         _rsum = json.load(f)
     _rsum = _backfill_match_state_window_labels(_rsum, match_dir)
     _rsum = reconcile_goals_and_state(_rsum, mc)
+    _rsum["set_piece_filter_summary"] = _accumulate_setpiece_verdicts(logs_dir)
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(stamp_schema_version(_rsum, "running_summary"), f, indent=2)
     _gr = _rsum.get("goal_reconciliation", {})
