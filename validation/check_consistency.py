@@ -173,7 +173,8 @@ def check(summary):
         return "level"
 
     def window_abs_min(label):
-        mm = re.match(r"(1H|2H)_(\d+)", label or "")
+        # search (not match): the half marker may be embedded, e.g. "W02_1H_05-10min"
+        mm = re.search(r"(1H|2H)_(\d+)", label or "")
         if not mm:
             return None
         half, start = mm.group(1), int(mm.group(2))

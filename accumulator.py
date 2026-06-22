@@ -1539,6 +1539,36 @@ def _accumulate_player_tendencies(logs_dir: str, mc: dict) -> dict:
     }
 
 
+def _backfill_match_state_window_labels(summary, match_dir):
+    """Populate the 'window' label on match_state_by_window entries that lack it,
+    by mapping agent_id -> the window_plan label. Some merged window files omit the
+    window label (window=None); without it the gate cannot place the window in time
+    and reconcile cannot derive match_state. agent_id mapping only -- no positional
+    guessing (unreliable when window and match_state counts differ)."""
+    wp_path = os.path.join(match_dir, "window_plan.json")
+    if not os.path.exists(wp_path):
+        return summary
+    try:
+        with open(wp_path, encoding="utf-8") as f:
+            windows = json.load(f).get("windows", [])
+    except Exception:
+        return summary
+    by_agent = {str(w.get("agent_id")): w.get("label")
+                for w in windows if w.get("agent_id") is not None and w.get("label")}
+    n = 0
+    for e in summary.get("match_state_by_window", []):
+        if e.get("window"):
+            continue
+        aid = e.get("agent_id")
+        lab = by_agent.get(str(aid)) if aid is not None else None
+        if lab:
+            e["window"] = lab
+            n += 1
+    if n:
+        print(f"  Window-label backfill: filled {n} match_state_by_window labels from window_plan")
+    return summary
+
+
 def reconcile_goals_and_state(summary, config):
     """Reconcile the goal log and derive match_state from the resulting ledger.
 
@@ -1569,7 +1599,8 @@ def reconcile_goals_and_state(summary, config):
         return int(m.group(1)) if m else None
 
     def window_abs_min(label):
-        mm = re.match(r"(1H|2H)_(\d+)", label or "")
+        # search (not match): half marker may be embedded, e.g. "W02_1H_05-10min"
+        mm = re.search(r"(1H|2H)_(\d+)", label or "")
         if not mm: return None
         half, start = mm.group(1), int(mm.group(2))
         return start if half == "1H" else 45 + start
@@ -1843,6 +1874,7 @@ def accumulate_all_windows(match_dir: str) -> dict:
     # never-reconcile defect; preserves dropped goals in goal_reconciliation.
     with open(summary_path, encoding="utf-8") as f:
         _rsum = json.load(f)
+    _rsum = _backfill_match_state_window_labels(_rsum, match_dir)
     _rsum = reconcile_goals_and_state(_rsum, mc)
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(stamp_schema_version(_rsum, "running_summary"), f, indent=2)
