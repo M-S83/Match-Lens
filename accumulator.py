@@ -1584,6 +1584,20 @@ def reconcile_goals_and_state(summary, config):
         if t in ("away", "away_kit"): return summary.get("away_team")
         return t
 
+    def op_team(o):
+        # operator goal 'team' may be a bare string OR {"name": ...}
+        t = o.get("team")
+        if isinstance(t, dict):
+            t = t.get("name") or t.get("team")
+        return norm_team(t)
+
+    def op_minute(o):
+        # operator goal minute may be in 'minute' OR (StatsBomb-style) time.elapsed
+        m = o.get("minute")
+        if m is None and isinstance(o.get("time"), dict):
+            m = o["time"].get("elapsed")
+        return parse_minute(m)
+
     def mentioned_totals(desc):
         return {int(x) + int(y) for x, y in
                 re.findall(r"(?<!\d)(?<!\d[-–])(\d)\s*[-–]\s*(\d)(?!\s*[-–]\s*\d)", desc or "")}
@@ -1599,7 +1613,7 @@ def reconcile_goals_and_state(summary, config):
         method = "operator_facts_authoritative"
         used = [False] * len(footage)
         for o in op_goals:
-            ot, om = norm_team(o.get("team")), parse_minute(o.get("minute"))
+            ot, om = op_team(o), op_minute(o)
             hit = None
             for i, fg in enumerate(footage):
                 if used[i] or kit_to_team(fg.get("team")) != ot:
