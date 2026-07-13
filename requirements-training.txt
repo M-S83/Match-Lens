@@ -1,0 +1,10 @@
+# Dependencies introduced during the Pydantic + LangGraph training rebuild
+# (branch: training/pydantic-models). Kept as a separate file from any
+# existing requirements the main pipeline may use, so this branch's
+# additions are easy to see and don't silently change what `main` depends on.
+#
+# Install with: pip install -r requirements-training.txt
+
+pydantic>=2.0
+langgraph
+langchain-core
