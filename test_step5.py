@@ -20,7 +20,9 @@ print(partial.model_dump_json(indent=2))
 print("\n--- test 3: formation that doesn't sum to 10 outfield players, should FAIL ---")
 try:
     TeamFormation(in_possession="4-3-2")  # 4+3+2 = 9, not 10
-    print("PROBLEM: this should NOT have succeeded")
+    # WHY raise instead of print -- see test_step2.py's comment: a
+    # print-only "problem" branch is a fail-silent bug in the test itself.
+    raise AssertionError("this should NOT have succeeded")
 except ValidationError as e:
     print("Correctly rejected:")
     print(e)
@@ -28,7 +30,9 @@ except ValidationError as e:
 print("\n--- test 4: non-numeric formation string, should FAIL ---")
 try:
     TeamFormation(out_of_possession="four-four-two")
-    print("PROBLEM: this should NOT have succeeded")
+    # WHY raise instead of print -- see test_step2.py's comment: a
+    # print-only "problem" branch is a fail-silent bug in the test itself.
+    raise AssertionError("this should NOT have succeeded")
 except ValidationError as e:
     print("Correctly rejected:")
     print(e)

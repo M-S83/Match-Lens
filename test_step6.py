@@ -40,7 +40,9 @@ print(bare.model_dump_json(indent=2))
 print("\n--- test 3: bad window_id format (not two-digit zero-padded), should FAIL ---")
 try:
     WindowResult(window_id="7", start_s=0.0, end_s=30.0, half="1H")
-    print("PROBLEM: this should NOT have succeeded")
+    # WHY raise instead of print -- see test_step2.py's comment: a
+    # print-only "problem" branch is a fail-silent bug in the test itself.
+    raise AssertionError("this should NOT have succeeded")
 except ValidationError as e:
     print("Correctly rejected:")
     print(e)
@@ -48,7 +50,9 @@ except ValidationError as e:
 print("\n--- test 4: invalid half value, should FAIL ---")
 try:
     WindowResult(window_id="07", start_s=0.0, end_s=30.0, half="halftime")
-    print("PROBLEM: this should NOT have succeeded")
+    # WHY raise instead of print -- see test_step2.py's comment: a
+    # print-only "problem" branch is a fail-silent bug in the test itself.
+    raise AssertionError("this should NOT have succeeded")
 except ValidationError as e:
     print("Correctly rejected:")
     print(e)

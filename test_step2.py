@@ -28,7 +28,15 @@ try:
         occlusion_score=0.5,
         ball_follow_bias=0.5,
     )
-    print("PROBLEM: this should NOT have succeeded:", bad)
+    # WHY this is `raise AssertionError(...)` now, not `print("PROBLEM: ...")`:
+    # a `print()` here is a "fail silent" bug living inside the TEST ITSELF --
+    # the exact thing Concept 1 in the glossary warns about. If a future
+    # change accidentally loosened the `le=1.0` constraint on this field,
+    # this branch would run, print a warning nobody is watching for, and
+    # the script would still exit 0 -- a green test suite hiding a real
+    # regression. Raising makes the test fail loudly and visibly instead,
+    # which is the entire point of writing the test in the first place.
+    raise AssertionError(f"this should NOT have succeeded, but got: {bad}")
 except ValidationError as e:
     print("Correctly rejected. Error message:")
     print(e)

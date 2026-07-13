@@ -34,7 +34,10 @@ try:
         visibility_scores=bad_scores,
         source_limitations_note="test",
     )
-    print("PROBLEM: this should NOT have succeeded:", bad)
+    # WHY raise instead of print here -- see test_step2.py's comment on the
+    # same pattern: a print-only "problem" branch is a fail-silent bug in
+    # the test, not a fail-loud one.
+    raise AssertionError(f"this should NOT have succeeded, but got: {bad}")
 except ValidationError as e:
     print("Correctly rejected. Error message:")
     print(e)

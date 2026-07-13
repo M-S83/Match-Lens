@@ -34,7 +34,9 @@ print(full.model_dump_json(indent=2))
 print("\n--- test 3: bad timestamp (no 'm'/'s'), should FAIL ---")
 try:
     SetPiece(timestamp="not-a-timestamp", type="corner_left", team="home_kit", window="w014")
-    print("PROBLEM: this should NOT have succeeded")
+    # WHY raise instead of print -- see test_step2.py's comment: a
+    # print-only "problem" branch is a fail-silent bug in the test itself.
+    raise AssertionError("this should NOT have succeeded")
 except ValidationError as e:
     print("Correctly rejected:")
     print(e)
@@ -42,7 +44,9 @@ except ValidationError as e:
 print("\n--- test 4: invalid type AND invalid team together, should FAIL ---")
 try:
     SetPiece(timestamp="23m 14s", type="penalty", team="referee", window="w014")
-    print("PROBLEM: this should NOT have succeeded")
+    # WHY raise instead of print -- see test_step2.py's comment: a
+    # print-only "problem" branch is a fail-silent bug in the test itself.
+    raise AssertionError("this should NOT have succeeded")
 except ValidationError as e:
     print("Correctly rejected:")
     print(e)
