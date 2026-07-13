@@ -2281,7 +2281,21 @@ def _metric_compactness_geometry(summary, source_type):
 
 
 def _metric_defensive_third_turnover_rate(summary, source_type):
-    """NEW v3 metric (was impossible to compute pre-Step-5)."""
+    """NEW v3 metric (was impossible to compute pre-Step-5).
+
+    Step 23: this function itself needed no logic change -- it was
+    already correctly reading defending_third_turnover_count /
+    defending_third_sequence_count from the summary. The bug was
+    entirely upstream, in accumulator.py's _count_defending_turnovers(),
+    which populates those two fields and was always writing (0, 0). See
+    that function's docstring for the fix and for why it's a partial fix
+    (real sequences are labelled by EITHER vertical third OR horizontal
+    channel, never both, so ~15% of real sequences have a genuinely
+    unknowable third and are excluded from this metric's denominator).
+    That caveat is surfaced below in the metric's own limitation_note /
+    source_limitations fields so report readers see it, not just this
+    codebase's own comments.
+    """
     turnovers = summary.get("defending_third_turnover_count", 0)
     total = summary.get("defending_third_sequence_count", 0)
 
@@ -2290,9 +2304,21 @@ def _metric_defensive_third_turnover_rate(summary, source_type):
                             "Fewer than 3 sequences starting in defending third")
 
     rate = turnovers / total
-    downgraded, _, note = _source_caps_for_metric(
+    downgraded, _, source_note = _source_caps_for_metric(
         "build_up_effectiveness_score", source_type  # similar structural gate
     )
+    # Step 23: always-present caveat about the partial-coverage nature of
+    # this metric's denominator (see _count_defending_turnovers() for the
+    # full reasoning) -- distinct from source_note, which is about the
+    # capture source (broadcast/veo) and may be None for this source type.
+    partial_coverage_note = (
+        "Sequences are labelled by EITHER vertical third OR horizontal "
+        "channel, never both -- channel-labelled sequences (~15% on the "
+        "real Gorleston match) are excluded because their vertical third "
+        "is genuinely unknown, not just unread. This rate is an honest "
+        "undercount of the denominator, not a wrong one."
+    )
+    note = f"{source_note} {partial_coverage_note}" if source_note else partial_coverage_note
 
     return {
         "metric_name":   "defensive_third_turnover_rate",
@@ -2316,9 +2342,10 @@ def _metric_defensive_third_turnover_rate(summary, source_type):
         "fps_context":             "1fps observation",
         "source_limitations":      note,
         "calculation_basis": (
-            "Sequences with zone_start.vertical_third = defending AND outcome "
+            "Sequences with start_zone == 'defending_third' AND outcome "
             "in {lost_possession, clearance} divided by total sequences "
-            "starting in defending third."
+            "starting in defending third (channel-labelled sequences "
+            "excluded -- see limitation_note)."
         ),
         "traceable_to":            [
             "defending_third_turnover_count",

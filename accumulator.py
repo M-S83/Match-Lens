@@ -173,20 +173,42 @@ def _count_defending_turnovers(pass_sequences):
     in the defending third. Turnover = outcome in {lost_possession,
     clearance}.
 
-    v3 Step 5 helper. Reads zone_start.vertical_third (dict shape, the
-    v3 contract). Sequences without dict-shaped zone_start
-    (e.g. the current Bayern data where the structural agent still
-    emits start_zone as a string) are skipped -- they contribute zero
-    to both numerator and denominator until Step 18 brings the
-    upstream schema into alignment."""
+    Step 23 fix: this was written waiting for a v3 dict-shaped
+    zone_start.vertical_third contract that never arrived -- every real
+    structural agent output (confirmed across the full Gorleston match)
+    uses a flat string field named start_zone, not a dict named
+    zone_start. seq.get("zone_start") is always None on real data, so
+    `zs = None or {}` evaluated to an empty dict -- which IS a dict, so
+    the isinstance guard never actually triggered its `continue`. The
+    function instead fell through to `zs.get("vertical_third")` on that
+    empty dict, which is also always None, so `v_start == "defending"`
+    was always False. Same end result (0, 0) either way, but worth being
+    precise about which line actually did the silent rejecting -- it
+    was the value comparison, not the isinstance guard the docstring's
+    own comment implied. This silently returned (0, 0) for every match
+    ever run, and the metric above it always reported 'fewer than 3
+    sequences' -- indistinguishable from a match that genuinely had no
+    defending-third sequences at all.
+
+    This is a PARTIAL fix, not a full one, by design: the real zone
+    taxonomy is single-dimension per sequence -- a sequence is EITHER
+    labelled by its vertical third (defending_third/middle_third/
+    attacking_third) OR by its horizontal channel (left_channel/
+    right_channel/central_channel), never both at once. A sequence that
+    genuinely starts in the defending third, but whose most salient
+    feature to the extraction agent was width (labelled 'left_channel'
+    instead of 'defending_third'), is correctly excluded here rather
+    than guessed at -- its vertical third is truly unknown from this
+    data, not just unread. On the real Gorleston match, 85.4% of
+    sequences (311/364) carry a known vertical third; the remaining
+    14.6% (53) are channel-labelled and excluded, so this metric's
+    denominator is an honest, acknowledged undercount of true
+    defending-third sequences -- not a wrong number, and not a full
+    recovery of every genuinely-defending-third sequence either."""
     turnover_count = 0
     sequence_count = 0
     for seq in (pass_sequences or []):
-        zs = seq.get("zone_start") or {}
-        if not isinstance(zs, dict):
-            continue
-        v_start = zs.get("vertical_third")
-        if v_start == "defending":
+        if seq.get("start_zone") == "defending_third":
             sequence_count += 1
             outcome = seq.get("outcome")
             if outcome in {"lost_possession", "clearance"}:
@@ -769,8 +791,9 @@ def update_running_summary(merged_path: str,
 
     # defending_third_turnover_count / _sequence_count -- numerator
     # and denominator for defending-third turnover rate metric.
-    # Same Step-18 dependency as above (reads zone_start.vertical_third
-    # which is None on pre-Step-18 data, so both contribute zero).
+    # Step 23: fixed to read the real flat start_zone field (see
+    # _count_defending_turnovers()'s docstring for the full reasoning,
+    # including why this is a partial -- not full -- fix).
     _dt_turn, _dt_total = _count_defending_turnovers(_ps_raw)
     summary["defending_third_turnover_count"] = (
         summary.get("defending_third_turnover_count", 0) + _dt_turn
