@@ -31,14 +31,29 @@ def _make_match_dir_missing_window_files() -> str:
     shape as test_step11's _make_ready_match_dir(), minus the three
     files this step's aggregator now owns."""
     d = tempfile.mkdtemp(prefix="matchlens_agg_")
+    # WHY the real ko_1h/ht_whistle/ko_2h/ft_whistle keys, not the simpler
+    # kickoff/half_time keys this fixture used before Step 18: see the
+    # matching comment in test_step11.py's _make_ready_match_dir() -- the
+    # match graph now runs a real ground_truth_node before readiness_gate,
+    # and ground_truth.py's minute-to-video conversion reads these exact
+    # keys with direct bracket access, matching real match_boundaries.json.
     _write(d, "match_boundaries.json", {
-        "boundaries": {"kickoff": {"confidence": 0.95}, "half_time": {"confidence": 0.90}},
+        "boundaries": {
+            "ko_1h":      {"seconds": 0,    "confidence": 0.95},
+            "ht_whistle": {"seconds": 2700, "confidence": 0.95},
+            "ko_2h":      {"seconds": 2760, "confidence": 0.90},
+            "ft_whistle": {"seconds": 5460, "confidence": 0.90},
+        },
     })
     _write(d, "match_config.json", {
         "verified": True, "enrichment_level": "identity_only",
         "player_id_ceiling": "tentative", "match": "Test FC vs Test United",
     })
-    _write(d, "ground_truth_check.json", {"missed": 0, "total": 5})
+    # WHY no hand-written ground_truth_check.json here any more: same reason
+    # as test_step11.py -- the graph's real ground_truth_node produces this
+    # file itself now, and this fixture's zero-event match_config.json makes
+    # that real computation land on events_checked=0/missed=0, same as the
+    # old stand-in asserted, but genuinely earned this time.
     _write(d, "rerun_queue.json", {"rerun_queue": []})
     _write(d, "confirmation_queue.json", {"total": 0, "skipped": 0})
     _write(d, "result_family_gates.json", {"gates": {}})

@@ -14,8 +14,25 @@ def _make_ready_match_dir() -> str:
     """A match_dir with every file build_readiness_check() wants to see,
     all passing -- should come out report_ready=True."""
     d = tempfile.mkdtemp(prefix="matchlens_ready_")
+    # WHY these four specific keys (ko_1h/ht_whistle/ko_2h/ft_whistle), not
+    # the simpler kickoff/half_time keys this fixture used before Step 18:
+    # build_readiness_check()'s boundary-confidence check is generic (it
+    # just averages whatever confidence values are present under any keys),
+    # but ground_truth.py's minute-to-video-time conversion is NOT generic --
+    # it reads these four specific keys with direct bracket access, because
+    # that's the real schema real match_boundaries.json files use (see
+    # tests/fixtures/gorleston_vs_tilbury_gt/match_boundaries.json). Now that
+    # Step 18 wires ground_truth_node in front of readiness_gate_node in the
+    # real graph, this fixture has to satisfy BOTH readers, not just one --
+    # a mismatch here is exactly the kind of integration bug wiring two
+    # previously-separate functions together for the first time exposes.
     _write(d, "match_boundaries.json", {
-        "boundaries": {"kickoff": {"confidence": 0.95}, "half_time": {"confidence": 0.90}},
+        "boundaries": {
+            "ko_1h":      {"seconds": 0,    "confidence": 0.95},
+            "ht_whistle": {"seconds": 2700, "confidence": 0.95},
+            "ko_2h":      {"seconds": 2760, "confidence": 0.90},
+            "ft_whistle": {"seconds": 5460, "confidence": 0.90},
+        },
     })
     _write(d, "match_config.json", {
         "verified": True, "enrichment_level": "identity_only",
@@ -23,7 +40,16 @@ def _make_ready_match_dir() -> str:
     })
     _write(d, "window_plan.json", {"total_windows": 2})
     _write(d, "running_summary.json", {"windows_complete": 2, "data_gap_windows": []})
-    _write(d, "ground_truth_check.json", {"missed": 0, "total": 5})
+    # WHY ground_truth_check.json is NOT hand-written here any more (it was,
+    # before Step 18): the graph now has a real ground_truth_node that runs
+    # build_ground_truth_check() itself and writes this file for real before
+    # readiness_gate_node ever reads it -- a hand-written stand-in here would
+    # just get silently overwritten the moment the graph runs, which would
+    # be misleading to read later. Since this fixture's match_config.json
+    # (below) declares zero goals/substitutions/cards, the real check will
+    # correctly compute events_checked=0, missed=0 -- same "passes" outcome
+    # the hand-written stand-in used to assert, but now actually earned by
+    # running the real function instead of assumed by fixture fiat.
     _write(d, "rerun_queue.json", {"rerun_queue": []})
     _write(d, "confirmation_queue.json", {"total": 0, "skipped": 0})
     _write(d, "source_profile.json", {
