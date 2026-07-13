@@ -87,19 +87,61 @@ def seconds_match(ts_a: str, ts_b: str,
     return abs(a - b) <= tolerance
 
 
-def find_event_in_moments(event: dict, key_moments: list) -> dict | None:
+def find_event_in_moments(event: dict, key_moments: list,
+                          minute_to_video_s=None) -> dict | None:
     """
     Search key_moments for a match to a known event.
     Match criteria:
       1. Timestamp within TIMESTAMP_TOLERANCE_SECONDS
       2. Type match (goal/sub/card) if both specified
     Returns the matching moment dict or None.
+
+    minute_to_video_s: optional callable(minute: float) -> video_seconds,
+    the SAME kickoff-offset-aware conversion build_ground_truth_check()
+    already applies to the KNOWN-event side (via _minute_to_video_s).
+
+    WHY this parameter exists (bug found against a real completed match's
+    running_summary.json): real key_moments entries store a match-clock
+    "minute" field like "06:00" (scoreboard time elapsed), not a
+    "timestamp" field in video seconds -- this function previously read
+    only moment.get("timestamp", ""), which is always "" for real data,
+    so ts_ok was always False and NOTHING could ever match, no matter how
+    accurate the underlying detection was. Even after reading "minute"
+    instead, comparing it directly against the known-event side still
+    fails: minute "06:00" parses to 360 raw seconds, but the known-event
+    side is already shifted by the real kickoff offset (e.g. 351s, so
+    minute 6 -> 711s) -- 360 vs 711 is a 351s gap, far outside the 90s
+    tolerance, even though both describe the exact same real instant.
+    Passing minute_to_video_s lets this function put BOTH sides on the
+    same time axis before comparing, instead of only converting one.
     """
     event_ts   = event.get("timestamp") or f"{event.get('minute',0)*60}"
     event_type = event.get("type", "").lower()
 
     for moment in key_moments:
-        moment_ts   = moment.get("timestamp", "")
+        # WHY "timestamp" first, "minute" second: a producer that already
+        # writes pre-converted video-second timestamps (the shape this
+        # code originally assumed) must keep working unchanged; "minute"
+        # is the fallback for the real match-clock shape seen in
+        # production.
+        moment_raw = moment.get("timestamp")
+        used_minute_field = moment_raw is None
+        if used_minute_field:
+            moment_raw = moment.get("minute", "")
+
+        moment_ts = moment_raw
+        if used_minute_field and minute_to_video_s is not None:
+            raw_seconds = parse_timestamp_to_seconds(moment_raw)
+            if raw_seconds is not None:
+                # raw_seconds here is match-clock seconds elapsed (e.g.
+                # "06:00" -> 360). _minute_to_video_s expects MINUTES,
+                # and applies the real kickoff-offset math -- the same
+                # conversion already used for the known-event side --
+                # so both sides end up on the same video-time axis.
+                converted = minute_to_video_s(raw_seconds / 60.0)
+                if converted is not None:
+                    moment_ts = str(converted)
+
         moment_type = moment.get("type", "").lower()
 
         ts_ok   = seconds_match(event_ts, moment_ts)
@@ -248,7 +290,8 @@ def build_ground_truth_check(match_dir: str) -> dict:
     rerun_needed = []
 
     for event in known_events:
-        found_moment = find_event_in_moments(event, key_moments)
+        found_moment = find_event_in_moments(event, key_moments,
+                                              minute_to_video_s=_minute_to_video_s)
         event_secs   = parse_timestamp_to_seconds(event["timestamp"])
         win_id       = event_window_id(event_secs, windows) if event_secs else None
 

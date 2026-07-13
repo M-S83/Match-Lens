@@ -1,0 +1,49 @@
+{
+  "key_moments": [
+    {
+      "minute": "18:30",
+      "type": "card",
+      "team": "away_kit",
+      "description": "Yellow card shown to away player for tactical foul"
+    },
+    {
+      "minute": "23:45",
+      "type": "tactical_shift",
+      "team": "away_kit",
+      "description": "Tilbury drops deeper into compact block, two banks of four with wingers tracking back"
+    },
+    {
+      "minute": "47:30",
+      "type": "tactical_shift",
+      "team": "away_kit",
+      "description": "Tilbury drops deeper into compact 4-5-1 defensive block"
+    },
+    {
+      "minute": "93:45",
+      "type": "substitution",
+      "team": "home_kit",
+      "description": "Gorleston substitution - player management in closing stages"
+    },
+    {
+      "type": "goal",
+      "team": "Gorleston",
+      "minute": "06:00",
+      "source": "operator",
+      "detected_in_footage": false
+    },
+    {
+      "type": "goal",
+      "team": "Gorleston",
+      "minute": "45:00",
+      "source": "operator",
+      "detected_in_footage": false
+    },
+    {
+      "type": "goal",
+      "team": "Gorleston",
+      "minute": "59:00",
+      "source": "operator",
+      "detected_in_footage": false
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "match": "Gorleston vs Tilbury",
+  "video_duration_seconds": 7387,
+  "boundaries": {
+    "ko_1h": {
+      "frame": "frame_05m51s.jpg",
+      "seconds": 351,
+      "confidence": 1.0
+    },
+    "ht_whistle": {
+      "frame": "frame_54m04s.jpg",
+      "seconds": 3244,
+      "confidence": 1.0
+    },
+    "ko_2h": {
+      "frame": "frame_71m09s.jpg",
+      "seconds": 4269,
+      "confidence": 1.0
+    },
+    "ft_whistle": {
+      "frame": "frame_121m21s.jpg",
+      "seconds": 7281,
+      "confidence": 1.0
+    }
+  },
+  "live_play_seconds": {
+    "first_half": 2893,
+    "second_half": 3012,
+    "total": 5905
+  },
+  "dead_time_seconds": {
+    "pre_match": 351,
+    "halftime": 1025,
+    "post_match": 106
+  }
+}
