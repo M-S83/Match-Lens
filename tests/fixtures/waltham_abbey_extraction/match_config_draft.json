@@ -1,0 +1,519 @@
+{
+  "match": "Waltham Abbey vs Stanway Rovers",
+  "competition": "Isthmian League - North Division Play-off Semi Final",
+  "date": "2026-04-28",
+  "venue": "Capershotts",
+  "home_team": "Waltham Abbey",
+  "away_team": "Stanway Rovers",
+  "ft_score": "1-2",
+  "ht_score": "1-0",
+  "attendance": 620,
+  "kickoff": "7.45pm",
+  "referee": null,
+  "goals": [
+    {
+      "time": {
+        "elapsed": 35
+      },
+      "team": {
+        "name": "Waltham Abbey"
+      },
+      "player": {
+        "name": "Kai Brown"
+      },
+      "type": "normal"
+    },
+    {
+      "time": {
+        "elapsed": 57
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "Nat Mardell"
+      },
+      "type": "penalty"
+    },
+    {
+      "time": {
+        "elapsed": 79
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "Orlando Bethmann"
+      },
+      "type": "normal"
+    }
+  ],
+  "cards": [
+    {
+      "time": {
+        "elapsed": 37
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "Zack Zola Littlejohn"
+      },
+      "detail": "Yellow Card"
+    },
+    {
+      "time": {
+        "elapsed": 47
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "Reece Harris"
+      },
+      "detail": "Yellow Card"
+    },
+    {
+      "time": {
+        "elapsed": 54
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "Alexandruleonard Bolovan"
+      },
+      "detail": "Yellow Card"
+    },
+    {
+      "time": {
+        "elapsed": 58
+      },
+      "team": {
+        "name": "Waltham Abbey"
+      },
+      "player": {
+        "name": "Kieron Cathline"
+      },
+      "detail": "Red Card"
+    },
+    {
+      "time": {
+        "elapsed": 60
+      },
+      "team": {
+        "name": "Waltham Abbey"
+      },
+      "player": {
+        "name": "Jesse Akubuine"
+      },
+      "detail": "Yellow Card"
+    },
+    {
+      "time": {
+        "elapsed": 70
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "Alfie Cutbush"
+      },
+      "detail": "Yellow Card"
+    },
+    {
+      "time": {
+        "elapsed": 83
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "George Okoye"
+      },
+      "detail": "Yellow Card"
+    },
+    {
+      "time": {
+        "elapsed": 85
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "Callum Robinson"
+      },
+      "detail": "Yellow Card"
+    }
+  ],
+  "substitutions": [
+    {
+      "time": {
+        "elapsed": 30
+      },
+      "team": {
+        "name": "Waltham Abbey"
+      },
+      "player": {
+        "name": "Declan Rydings"
+      },
+      "assist": {
+        "name": "Nathaniel Orafu"
+      }
+    },
+    {
+      "time": {
+        "elapsed": 30
+      },
+      "team": {
+        "name": "Waltham Abbey"
+      },
+      "player": {
+        "name": "Amrit Bansal-Mcnulty"
+      },
+      "assist": {
+        "name": "Suley Zuhdu"
+      }
+    },
+    {
+      "time": {
+        "elapsed": 64
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "Nat Mardell"
+      },
+      "assist": {
+        "name": "Orlando Bethmann"
+      }
+    },
+    {
+      "time": {
+        "elapsed": 66
+      },
+      "team": {
+        "name": "Waltham Abbey"
+      },
+      "player": {
+        "name": "Benjamin Baker"
+      },
+      "assist": {
+        "name": "Prince William Domafriyie"
+      }
+    },
+    {
+      "time": {
+        "elapsed": 68
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "Reece Harris"
+      },
+      "assist": {
+        "name": "George Keys"
+      }
+    },
+    {
+      "time": {
+        "elapsed": 80
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "Alexandruleonard Bolovan"
+      },
+      "assist": {
+        "name": "Jordan Barnett"
+      }
+    },
+    {
+      "time": {
+        "elapsed": 82
+      },
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "player": {
+        "name": "George Okoye"
+      },
+      "assist": {
+        "name": "Oliver Robert Fraser"
+      }
+    }
+  ],
+  "lineups": [
+    {
+      "team": {
+        "name": "Waltham Abbey"
+      },
+      "startXI": [
+        {
+          "player": {
+            "name": "Kristers Ozols",
+            "number": 1,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Sam Robbins",
+            "number": 2,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Nathan Papa K Twum-...",
+            "number": 3,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Declan Rydings",
+            "number": 4,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Edwin Mensah",
+            "number": 5,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Benjamin Baker",
+            "number": 7,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Jesse Akubuine",
+            "number": 8,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Kai Brown",
+            "number": 9,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Amrit Bansal-Mcnulty",
+            "number": 10,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Luke Deslandes",
+            "number": 11,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Kieron Cathline",
+            "number": 18,
+            "pos": null
+          }
+        }
+      ],
+      "substitutes": [
+        {
+          "player": {
+            "name": "John Hickman",
+            "number": 13,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Nathaniel Orafu",
+            "number": 6,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Greig Stewart",
+            "number": 12,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Prince William Do...",
+            "number": 14,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Suley Zuhdu",
+            "number": 20,
+            "pos": null
+          }
+        }
+      ]
+    },
+    {
+      "team": {
+        "name": "Stanway Rovers"
+      },
+      "startXI": [
+        {
+          "player": {
+            "name": "Callum Robinson",
+            "number": 1,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Reece Harris",
+            "number": 3,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Joe Debell",
+            "number": 6,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Nat Mardell",
+            "number": 7,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Tom Maycock",
+            "number": 10,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Jamie Bennett",
+            "number": 11,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Marley Andrews",
+            "number": 14,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "George Okoye",
+            "number": 19,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Alexandruleonard Bolovan",
+            "number": 20,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Zack Zola Littlejohn",
+            "number": 31,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Alfie Cutbush",
+            "number": 35,
+            "pos": null
+          }
+        }
+      ],
+      "substitutes": [
+        {
+          "player": {
+            "name": "Ricky Tarbard",
+            "number": 2,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Jordan Barnett",
+            "number": 4,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "George Keys",
+            "number": 15,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Orlando Bethmann",
+            "number": 18,
+            "pos": null
+          }
+        },
+        {
+          "player": {
+            "name": "Oliver Robert Fraser",
+            "number": 12,
+            "pos": null
+          }
+        }
+      ]
+    }
+  ],
+  "kit_colours": {
+    "home": null,
+    "away": null,
+    "home_gk": null,
+    "away_gk": null,
+    "_note": "Kit colours are not shown on this page \u2014 fill in manually"
+  },
+  "source": "full_time_screenshot",
+  "extraction_confidence": "medium",
+  "extraction_notes": "Some player names are truncated (Nathan Papa K Twum-..., Prince William Do..., Alexandruleonar...). The substitution times for the first two Waltham Abbey subs appear to show '30' but the exact minute is partially obscured. Referee field shows 'null' on the page itself. The Callum Robinson caution at 85' is inferred from the partially visible text at bottom of second image.",
+  "home_kit": null,
+  "away_kit": null,
+  "home_gk_kit": null,
+  "away_gk_kit": null,
+  "attack_direction_1h": null,
+  "attack_direction_2h": null,
+  "enrichment_level": "full",
+  "player_id_ceiling": "confirmed",
+  "pitch_dimensions_assumed": {
+    "length_m": 105,
+    "width_m": 68,
+    "source": "default"
+  },
+  "watch_list": [],
+  "verified": false,
+  "schema_version": "1.0"
+}

@@ -1,8 +1,10 @@
 """
 extract_match_details.py — Match Lens Step 1d (image variant)
 
-Extracts match details from a screenshot of the Full-Time website
-(or similar structured match results page) using Claude vision.
+Extracts match details from one or more screenshots of the Full-Time
+website (or similar structured match results page, e.g. footballwebpages.
+co.uk) using Claude vision. Multiple screenshots are needed when a single
+page requires scrolling to capture in full.
 
 Outputs:
   match_config_draft.json  — structured match data, ready for verification
@@ -138,21 +140,55 @@ def encode_image(image_path: str) -> tuple[str, str]:
     return data, media_type
 
 
-def extract_match_details(match_dir: str, screenshot_path: str) -> dict:
+def extract_match_details(match_dir: str, screenshot_path) -> dict:
     """
-    Run vision extraction on the screenshot and write output files.
-    Returns the extracted data dict.
+    Run vision extraction on one or more screenshots of the SAME match page
+    and write output files. Returns the extracted data dict.
+
+    screenshot_path: a single path (str), OR a list of paths when the source
+    page needed multiple screenshots to capture in full (e.g. a page that
+    required scrolling -- footballwebpages.co.uk match reports commonly do,
+    since the goals/cards/subs timeline sits below the fold). WHY accept
+    both shapes instead of forcing callers to always pass a list: every
+    existing caller (and the CLI usage in this file) only ever had one
+    screenshot, so keeping that the simple case avoids breaking anything
+    while still covering the real multi-screenshot case.
     """
-    if not os.path.exists(screenshot_path):
-        raise FileNotFoundError(f"Screenshot not found: {screenshot_path}")
+    # Normalise to a list up front so the rest of the function only has to
+    # handle ONE shape, not two -- this is the same reasoning we've used
+    # everywhere else in this codebase for Optional/Union inputs: normalise
+    # once at the boundary, keep the body simple.
+    paths = [screenshot_path] if isinstance(screenshot_path, str) else list(screenshot_path)
+
+    for p in paths:
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"Screenshot not found: {p}")
 
     print(f"\n{'─'*55}")
     print(f"  Step 1d — Image extraction")
-    print(f"  Screenshot: {os.path.basename(screenshot_path)}")
+    print(f"  Screenshot(s): {', '.join(os.path.basename(p) for p in paths)}")
     print(f"{'─'*55}")
     print("  Sending to Claude vision...")
 
-    image_data, media_type = encode_image(screenshot_path)
+    # WHY one image block per screenshot, in order, ahead of the single text
+    # block: Anthropic's vision API accepts multiple images in one message
+    # and reads them in the order given. Sending them together (rather than
+    # as separate API calls per screenshot) lets the model cross-reference
+    # data that spans screenshots -- e.g. screenshot 1 has the teamsheets
+    # (which player plays for which team), screenshot 2 has the cards/subs
+    # timeline (which only lists player names) -- Claude needs BOTH in view
+    # at once to correctly attribute a carded player to their team.
+    image_blocks = []
+    for p in paths:
+        image_data, media_type = encode_image(p)
+        image_blocks.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": image_data,
+            },
+        })
 
     client = anthropic.Anthropic()
     response = client.messages.create(
@@ -161,15 +197,7 @@ def extract_match_details(match_dir: str, screenshot_path: str) -> dict:
         messages=[
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": image_data,
-                        },
-                    },
+                "content": image_blocks + [
                     {
                         "type": "text",
                         "text": EXTRACTION_PROMPT,
@@ -181,9 +209,13 @@ def extract_match_details(match_dir: str, screenshot_path: str) -> dict:
 
     raw_text = response.content[0].text.strip()
 
-    # Save raw response as permanent record
+    # Save raw response as permanent record. WHY store the normalised
+    # `paths` list (not the original screenshot_path arg): the arg could be
+    # a single string OR a list -- the raw record should always show what
+    # was ACTUALLY sent to the model, in a consistent shape, regardless of
+    # how the caller invoked the function.
     raw_record = {
-        "screenshot": screenshot_path,
+        "screenshots": paths,
         "extracted_at": datetime.now().isoformat(),
         "model": response.model,
         "usage": {
@@ -339,15 +371,19 @@ Edit match_config_draft.json, then copy to match_config.json and set verified: t
 
 
 if __name__ == "__main__":
+    # WHY args[1:] (plural) rather than args[1]: the CLI now mirrors the
+    # function signature -- any number of trailing args are all screenshot
+    # paths for the SAME match page, e.g.
+    #   python extract_match_details.py MATCH_DIR shot1.jpg shot2.jpg
     args = sys.argv[1:]
     if len(args) >= 2:
-        match_dir      = args[0]
-        screenshot_path = args[1]
+        match_dir       = args[0]
+        screenshot_path = args[1:]
     elif len(args) == 1:
-        match_dir      = args[0]
+        match_dir       = args[0]
         screenshot_path = input("Screenshot path: ").strip().strip('"')
     else:
-        match_dir      = input("Match directory: ").strip().strip('"')
+        match_dir       = input("Match directory: ").strip().strip('"')
         screenshot_path = input("Screenshot path: ").strip().strip('"')
 
     if not os.path.isdir(match_dir):
