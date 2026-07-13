@@ -33,6 +33,10 @@ def _make_ready_match_dir() -> str:
     _write(d, "deep_skill_metrics.json", {
         "total_metrics": 0, "active_metrics": 0, "suppressed_metrics": [], "avg_confidence": 0.0,
     })
+    # required by synthesis_agent.build_input_bundle() (REQUIRED_FILES) --
+    # doesn't need real pass data, just needs to exist, since Step 11's
+    # synthesize_node calls the real run_synthesis() end to end.
+    _write(d, "pass_sequences.json", {"sequences": []})
     return d
 
 
@@ -52,8 +56,23 @@ result_ready = app.invoke(MatchState(match_dir=ready_dir))
 print(f"  report_ready={result_ready['report_ready']}, blocking_issues={result_ready['blocking_issues']}")
 assert result_ready["report_ready"] is True
 assert result_ready["blocking_issues"] == []
-print("Confirmed: ready match routed straight to synthesize (see '[synthesize]' log line above, "
-      "no '[STUB EMAIL]' lines).")
+
+# The real run_synthesis() should have actually run (LLM call stubbed)
+# and written three real .md files to disk in the temp match_dir.
+synth = result_ready["synthesis_result"]
+print(f"  synthesis_result={synth}")
+assert synth["status"] == "complete"
+for fname in ("tactical_report.md", "opposition_report_home.md", "opposition_report_away.md"):
+    fpath = os.path.join(ready_dir, fname)
+    assert os.path.exists(fpath), f"expected {fname} to be written by run_synthesis()"
+    with open(fpath, encoding="utf-8") as f:
+        content = f.read()
+    assert "STUB" in content, f"{fname} should contain the stub marker"
+    print(f"  {fname}: {len(content)} chars written, contains stub marker")
+
+print("Confirmed: ready match routed to synthesize, which ran the REAL run_synthesis() "
+      "(bundle loading, roster block, prompt building, file writing) with only the network "
+      "call stubbed -- three real .md files landed on disk, no '[STUB EMAIL]' lines.")
 
 print("\n--- test 2: a match that is NOT ready -> should route to insufficient_data + send an email ---")
 not_ready_dir = _make_not_ready_match_dir()

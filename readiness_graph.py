@@ -24,6 +24,8 @@ import json
 import os
 from typing import List, Literal, Optional
 
+import synthesis_agent
+
 from pydantic import BaseModel
 from langgraph.graph import StateGraph, START, END
 
@@ -38,6 +40,7 @@ class MatchState(BaseModel):
     match_dir: str
     report_ready: Optional[bool] = None
     blocking_issues: List[str] = []
+    synthesis_result: Optional[dict] = None
 
 
 def readiness_gate_node(state: MatchState) -> dict:
@@ -69,15 +72,54 @@ def route_after_readiness_gate(state: MatchState) -> Literal["synthesize", "insu
     return "synthesize" if state.report_ready else "insufficient_data"
 
 
-# WHY this is only a print-stub for now, not a real call into
-# synthesis_agent.py: wiring up the real report-writing step is its own
-# training step (the next piece of Phase 4 after this), and putting a
-# half-finished version of it here would blur what this step is actually
-# teaching -- the readiness gate and the failure alert.
+# WHY this stub matches _call_synthesis's exact signature and return
+# type (a plain string): synthesis_agent._write_tactical_report() and
+# _write_opposition_report() call _call_synthesis(...) and then write
+# whatever string comes back straight to a .md file. As long as our
+# stub returns a string with the same signature, run_synthesis()'s real
+# file-writing code works completely unmodified -- we only need to
+# replace the one function that actually reaches the network.
+def _stub_synthesis_llm_response(system_prompt: str, user_content: str, max_tokens: int = 8000) -> str:
+    kind = "opposition" if "OPPOSITION REPORT" in user_content else "tactical"
+    return (
+        f"# STUB {kind} report\n\n"
+        f"ROSTER CHECK: PASSED\n\n"
+        f"This is a placeholder report body ({len(user_content)} chars of "
+        f"prompt were built for real from the actual pipeline data). Swap "
+        f"this function for a real anthropic.Anthropic().messages.create() "
+        f"call once an API key is configured."
+    )
+
+
+# WHY this monkeypatches synthesis_agent._call_synthesis instead of
+# reimplementing run_synthesis(): everything in run_synthesis() EXCEPT
+# that one function is real, already-written pipeline code -- loading
+# match_config/running_summary/pass_sequences (build_input_bundle),
+# building the roster block and the per-document prompts, writing three
+# separate .md files, and catching per-document failures so one bad
+# document doesn't take down the other two. Swapping out just the
+# network call and running the real function around it means this node
+# is exercising the actual production code path, not a parallel
+# reimplementation of it that could quietly drift out of sync.
 def synthesize_node(state: MatchState) -> dict:
     print(f"  [synthesize] match {state.match_dir}: report_ready=True -- "
-          f"would call synthesis_agent.py here (not built yet)")
-    return {}
+          f"running real synthesis_agent.run_synthesis() (LLM call stubbed)")
+
+    original_call_synthesis = synthesis_agent._call_synthesis
+    synthesis_agent._call_synthesis = _stub_synthesis_llm_response
+    try:
+        result = synthesis_agent.run_synthesis(state.match_dir)
+    finally:
+        # WHY restore in a finally, not just after the call: if
+        # run_synthesis() ever raised instead of catching its own
+        # per-document errors, leaving the stub permanently installed
+        # on the shared synthesis_agent module would silently break
+        # every later real call in the same process. This isn't
+        # hypothetical caution -- it's the same reason a database
+        # connection gets closed in a finally block.
+        synthesis_agent._call_synthesis = original_call_synthesis
+
+    return {"synthesis_result": result}
 
 
 # WHY the alert email is stubbed with a print, exactly like every LLM call
