@@ -19,7 +19,8 @@ from typing import List, Optional
 from pydantic import BaseModel
 from langgraph.graph import StateGraph, START, END
 
-from models import SourceProfile, VisibilityScores, Formation, SetPiece
+from models import SourceProfile, VisibilityScores, Formation, TeamFormation, SetPiece
+from accumulator import validate_set_piece
 
 
 # WHY the state is a Pydantic model, not a plain dict or TypedDict (the
@@ -81,18 +82,106 @@ def profile_source_node(state: PipelineState) -> dict:
 # .add_node(...) / .add_edge(...) calls as more steps are ported over --
 # one function, growing one line at a time, mirrors how we added one
 # Pydantic model at a time in Phase 1.
+# WHY this node returns raw dicts internally (a stubbed structural LLM
+# response) before converting to our models, instead of stubbing typed
+# objects directly like profile_source_node did: this is realistic. A
+# real LLM call returns raw JSON matching STRUCTURAL_OUTPUT_SCHEMA (see
+# pipeline_runner_v2.py), not a Pydantic object. Every real node in this
+# graph will need a parsing/adapter step exactly like this one -- raw
+# dict in, validated model out -- so it's worth seeing that step clearly
+# even while the LLM call itself is stubbed.
+def _stub_structural_llm_response(window_id: str) -> dict:
+    return {
+        "formation": {
+            "home": "4-3-3",
+            "away": "4-4-2",
+            "home_formation_basis": "confirmed_from_frames",
+            "away_formation_basis": "confirmed_from_frames",
+        },
+        "set_pieces": [
+            {
+                "timestamp": "7m 02s",
+                "type": "corner_left",
+                "team": "home_kit",
+                "delivery_zone": "near_post",
+                "marking": "zonal",   # note: raw schema still says "marking", not "marking_system"
+                "outcome": "cleared_near_post",
+            }
+        ],
+    }
+
+
+# WHY the raw schema only gives us a starting point for Formation, not
+# a complete one: STRUCTURAL_OUTPUT_SCHEMA asks the LLM for one "home"/
+# "away" formation string plus a free-text "variation" note for when
+# in-possession and out-of-possession shape differ (e.g. "defends as
+# 4-5-1"). That's unstructured text, not a clean formation string --
+# we can't safely auto-parse "defends as 4-5-1 -- wingers track back"
+# into out_of_possession="4-5-1" without risking silently wrong data.
+# So this adapter deliberately leaves out_of_possession as None for now
+# and is honest about why, rather than guessing. The real fix belongs
+# one level up, in the PROMPT: ask the LLM for in_possession and
+# out_of_possession as two separate clean fields, the same shape our
+# model already expects. That's a concrete, specific follow-up task for
+# whenever you touch pipeline_runner_v2.py's prompt text.
+def _parse_formation(raw: dict) -> Formation:
+    f = raw.get("formation", {})
+    return Formation(
+        home=TeamFormation(
+            in_possession=f.get("home"),
+            basis=f.get("home_formation_basis"),
+        ),
+        away=TeamFormation(
+            in_possession=f.get("away"),
+            basis=f.get("away_formation_basis"),
+        ),
+    )
+
+
+# WHY this reuses validate_set_piece() from accumulator.py instead of
+# writing a second normalizer from scratch: that function already does
+# exactly the field normalization we need (including get_marking()'s
+# marking -> marking_system rename, and all the same defaults our
+# SetPiece model uses). Reusing it means the F4 fix stays in one place.
+# validate_set_piece() returns a plain dict with one extra key
+# ("delivery", an alias pair with delivery_type) that our SetPiece
+# model doesn't define -- Pydantic's default behaviour is to silently
+# ignore fields a model doesn't recognise, so **normalized just works
+# without any extra config.
+def _parse_set_pieces(raw: dict, window_id: str) -> list[SetPiece]:
+    parsed = []
+    for sp in raw.get("set_pieces", []):
+        is_valid, normalized, reason = validate_set_piece(sp, window_id)
+        if not is_valid:
+            print(f"  [tier1_scan] rejected a set piece: {reason}")
+            continue
+        parsed.append(SetPiece(**normalized))
+    return parsed
+
+
+def tier1_scan_node(state: PipelineState) -> dict:
+    print(f"  [tier1_scan] window {state.window_id}: running 1fps structural scan (stubbed)")
+    raw = _stub_structural_llm_response(state.window_id)
+
+    formation = _parse_formation(raw)
+    set_pieces = _parse_set_pieces(raw, state.window_id)
+
+    return {"formation": formation, "set_pieces": set_pieces}
+
+
 def build_graph():
     graph = StateGraph(PipelineState)
 
     graph.add_node("profile_source", profile_source_node)
+    graph.add_node("tier1_scan", tier1_scan_node)
 
-    # WHY START -> profile_source -> END, spelled out explicitly, instead
-    # of just letting the single node run: with only one node the edges
-    # look redundant, but this is the exact same wiring pattern we'll
-    # reuse once there are 6 nodes and real branching logic -- learning
-    # the explicit form now means the next node is just one more
-    # add_node + add_edge call, not a new concept.
+    # WHY START -> profile_source -> tier1_scan -> END: this is a
+    # straight-line chain for now (no branching yet) -- escalation
+    # routing, the next piece, is where we introduce a CONDITIONAL edge
+    # that picks between two different next nodes based on what tier1_scan
+    # found, instead of always going to the same next step.
     graph.add_edge(START, "profile_source")
-    graph.add_edge("profile_source", END)
+    graph.add_edge("profile_source", "tier1_scan")
+    graph.add_edge("tier1_scan", END)
 
     return graph.compile()
