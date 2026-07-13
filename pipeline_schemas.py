@@ -77,7 +77,11 @@ SCHEMA_VERSIONS = {
 
     "report_readiness": "1.0",
     "confidence_reliability_report": "1.0",
-    "deep_skill_metrics": "1.0",
+    "deep_skill_metrics": "1.1",  # Step 20: momentum_score's value shape
+                                     # changed from one blended {avg,
+                                     # by_window, peak, low} to {home:
+                                     # {...}, away: {...}} -- two
+                                     # independent per-team series.
 }
 
 

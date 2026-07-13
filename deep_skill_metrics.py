@@ -286,50 +286,146 @@ def calc_gk_distribution_consistency(summary: dict) -> dict:
     }
 
 
-def calc_momentum_by_window(summary: dict) -> list:
+def _momentum_component(press, line_pct, poss_pct):
     """
-    Per-window momentum score from pressing, possession, and line height.
-    Returns list of {window, momentum, components} dicts.
+    Shared per-team, per-window composite math. Pulled out into its own
+    function (rather than written twice, once for home and once for away)
+    for the exact DRY reason we wrote up in the Step 19 glossary entry:
+    two copies of the same formula is how one of them silently goes stale
+    the next time the weighting or normalisation needs a fix.
+
+    press, line_pct: 0-10 / 0-100 raw readings for ONE team, or None if
+    that team's reading wasn't observable in this window.
+    poss_pct: 0-100 possession share for ONE team, or None if the
+    possession_by_window entry for this window has no usable data at all
+    (both teams get None together -- possession is always a same-window,
+    both-teams-or-neither reading, never lopsided).
+
+    Returns (momentum, components_dict) -- momentum is None only when BOTH
+    press and line_pct are None (i.e. genuinely nothing observable for
+    this team in this window; matches the original single-team logic's
+    "nothing to compute from" case, just applied per team now instead of
+    once for the whole match).
+    """
+    if press is None and line_pct is None:
+        return None, {}
+
+    # Normalise each raw reading to a common 0-1 scale so the weighted sum
+    # below is comparing like with like. A team with no reading for a
+    # given component falls back to 0.5 (neutral -- "assume average",
+    # not "assume zero") rather than dropping that component silently,
+    # which is exactly how the original single-team version behaved.
+    press_n = min(press / 10.0, 1.0) if press is not None else 0.5
+    line_n  = min(line_pct / 60.0, 1.0) if line_pct is not None else 0.5
+    poss_n  = poss_pct / 100.0 if poss_pct is not None else 0.5
+
+    # Weighted composite: press 35%, possession 40%, line height 25%.
+    # When possession has no data at all this window, its 40% weight is
+    # redistributed onto press/line rather than silently zeroing it out --
+    # same rebalancing the original function already did.
+    weights = (0.35, 0.40, 0.25) if poss_pct is not None else (0.55, 0.0, 0.45)
+    momentum = round(press_n * weights[0] + poss_n * weights[1] + line_n * weights[2], 3)
+
+    return momentum, {
+        "pressing":    round(press_n, 3),
+        "possession":  round(poss_n, 3) if poss_pct is not None else None,
+        "line_height": round(line_n, 3),
+    }
+
+
+def calc_momentum_by_window(summary: dict, match_config: dict) -> list:
+    """
+    Per-window momentum score, split by team (home vs away).
+
+    WHY split by team at all: synthesis_agent.py's report prompt has a
+    dedicated "Tactical Variation and Substitutions" section that's asked
+    to reason about whether a substitution shifted the game's momentum.
+    A single match-wide number (the old behaviour: subject_team="both",
+    one blended avg) can only ever say "the match got more/less intense"
+    -- it cannot say WHICH team that shift favoured, which is the one
+    thing a report actually needs to credit a substitution with having
+    worked (or not). Splitting the same formula per team, instead of
+    combining the two sides into one number first, is what makes that
+    attribution possible.
+
+    WHY read line_height_m_by_window instead of line_height_by_window:
+    checked directly against the real Gorleston match -- line_height_
+    by_window[*].avg_pct is None for all 21 windows, every single one.
+    accumulator.py's own Step-541 comment already documents why: the
+    structural vision agent's schema was changed to emit home_height_pct
+    / away_height_pct (see pipeline_runner_v2.py's defensive_line block),
+    but line_height_by_window's aggregation code was never updated and
+    still only ever looks for the old, no-longer-emitted avg_pct key.
+    line_height_m_by_window was added later specifically to carry the
+    real home/away split forward -- it's populated for all 21 real
+    windows. Momentum's line-height component has therefore been running
+    on the 0.5 neutral fallback for every window, in every match, since
+    it was written; splitting momentum per team requires per-team line
+    height data anyway, so this dead-field bug gets fixed as a direct
+    side effect of doing the split correctly, not as a separate fix.
+
+    WHY match_config is needed: pressing_by_window and line_height_m_
+    by_window already label their readings home_intensity/away_intensity
+    and home_height_pct/away_height_pct directly -- no resolution needed.
+    possession_by_window does NOT: it labels its single number focus_pct
+    (whichever team match_config.json's optional focus_team names, or
+    home_team if focus_team isn't set -- see pipeline_runner_v2.py line
+    1761's identical resolution: `focus_team = mc.get("focus_team") or
+    home_team`). Reusing that exact resolution rule here (rather than
+    inventing a different one) is what turns focus_pct into a real
+    home_pct/away_pct pair.
     """
     pb_win = {w["window"]: w for w in summary.get("pressing_by_window", [])
               if w.get("window")}
-    lh_win = {w["window"]: w for w in summary.get("line_height_by_window", [])
+    lh_win = {w["window"]: w for w in summary.get("line_height_m_by_window", [])
               if w.get("window")}
     po_win = {w["window"]: w for w in summary.get("possession_by_window", [])
               if w.get("window")}
 
+    home_team = summary.get("home_team", "")
+    away_team = summary.get("away_team", "")
+    # Same fallback rule pipeline_runner_v2.py already uses when building
+    # the extraction prompt itself -- an explicit match_config.focus_team
+    # wins, otherwise the home team is treated as focus by convention.
+    focus_team = (match_config or {}).get("focus_team") or home_team
+    focus_is_home = (focus_team == home_team)
+
     windows_seen = sorted(set(list(pb_win) + list(lh_win)), key=str)
     result = []
     for win in windows_seen:
-        pb  = pb_win.get(win, {})
-        lh  = lh_win.get(win, {})
-        po  = po_win.get(win, {})
+        pb = pb_win.get(win, {})
+        lh = lh_win.get(win, {})
+        po = po_win.get(win, {})
 
-        press     = pb.get("avg_score")
-        line_pct  = lh.get("avg_pct")
-        poss      = po.get("focus_pct")
+        press_home = pb.get("home_intensity")
+        press_away = pb.get("away_intensity")
+        line_home  = lh.get("home_height_pct")
+        line_away  = lh.get("away_height_pct")
 
-        if press is None and line_pct is None:
-            result.append({"window": win, "momentum": None, "components": {}})
-            continue
+        # focus_pct is a single number FROM the focus team's perspective.
+        # Turn it into a real home_pct/away_pct pair using the same
+        # focus-team resolution as above. Possession is always a
+        # both-teams-or-neither reading for a given window (there's no
+        # such thing as "we know the home team's possession share but not
+        # the away team's" -- they're complements of the same number),
+        # so both come from focus_pct together, or both are None together.
+        focus_pct = po.get("focus_pct")
+        if focus_pct is None:
+            poss_home = poss_away = None
+        elif focus_is_home:
+            poss_home, poss_away = focus_pct, round(100.0 - focus_pct, 1)
+        else:
+            poss_away, poss_home = focus_pct, round(100.0 - focus_pct, 1)
 
-        # Normalise each to 0-1
-        press_n = min(press / 10.0, 1.0) if press is not None else 0.5
-        line_n  = min(line_pct / 60.0, 1.0) if line_pct is not None else 0.5
-        poss_n  = poss / 100.0 if poss is not None else 0.5
-
-        # Weighted composite: press 35%, possession 40%, line height 25%
-        weights = (0.35, 0.40, 0.25) if poss is not None else (0.55, 0.0, 0.45)
-        momentum = round(press_n * weights[0] + poss_n * weights[1] + line_n * weights[2], 3)
+        home_momentum, home_components = _momentum_component(press_home, line_home, poss_home)
+        away_momentum, away_components = _momentum_component(press_away, line_away, poss_away)
 
         result.append({
-            "window":   win,
-            "momentum": momentum,
-            "components": {
-                "pressing":   round(press_n, 3),
-                "possession": round(poss_n, 3) if poss is not None else None,
-                "line_height":round(line_n, 3),
-            },
+            "window":         win,
+            "home_momentum":  home_momentum,
+            "away_momentum":  away_momentum,
+            "home_components": home_components,
+            "away_components": away_components,
         })
     return result
 
@@ -921,6 +1017,15 @@ def load_pipeline_data(match_dir):
         "gates":         load("result_family_gates.json", {"gates": {}}),
         "source":        load("source_profile.json",      {"source_type": "unknown", "visibility_scores": {}}),
         "confirmations": load("confirmation_queue.json",  {"items": []}),
+        # Step 20: momentum_score needs to know which team is "focus" so it
+        # can turn possession_by_window's focus_pct/opp_seqs framing into a
+        # real home/away split. calc_substitution_impact() (line 337) has
+        # ALWAYS declared match_config as a required parameter, but nothing
+        # in this loader ever supplied it -- another producer/consumer gap
+        # of exactly the same shape we already found and fixed in
+        # ground_truth.py (Step 19): a function assumes a caller wires in
+        # data that, in practice, no caller ever did.
+        "match_config":  load("match_config.json",        {}),
     }
 
 
@@ -2207,6 +2312,7 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
     gates         = data["gates"]
     source_prof   = data["source"]
     confirmations = data["confirmations"]
+    match_config  = data["match_config"]
     source_type   = source_prof.get("source_type", "unknown")
     global_cap    = SOURCE_GLOBAL_CAP.get(source_type, 0.5)
     total_windows = summary.get("windows_complete", 1)
@@ -2513,20 +2619,55 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
             "GK target zone and length consistency from gk_kicks[] array",
             sample_n=gk_val.get("total_kicks", 0)))
 
-    # Momentum score (composite per window)
-    mom_windows = calc_momentum_by_window(summary)
-    valid_mom   = [w for w in mom_windows if w.get("momentum") is not None]
-    if valid_mom:
-        avg_mom = round(sum(w["momentum"] for w in valid_mom)/len(valid_mom), 3)
+    # Momentum score (composite per window, split home vs away -- Step 20).
+    #
+    # Before this step, momentum_score reported ONE blended number per
+    # window (subject_team="both"), which can only say "the match got
+    # more/less intense" -- never which side that favoured. The report
+    # prompt (synthesis_agent.py's "Tactical Variation and Substitutions"
+    # section) needs to attribute a shift to a specific team around a
+    # substitution, so the value shape below carries two independent
+    # series (home/away) instead of one composite -- see
+    # calc_momentum_by_window()'s docstring for the full reasoning.
+    mom_windows = calc_momentum_by_window(summary, match_config)
+
+    def _team_summary(side):
+        # side is "home" or "away"; picks that team's momentum/components
+        # back out of the shared per-window list, dropping windows where
+        # THIS team specifically had nothing observable (the other team
+        # may still have a valid reading for the same window -- that's
+        # exactly the point of splitting, so one team's gap doesn't zero
+        # out or blank the other team's real reading).
+        valid = [
+            {"window": w["window"], "momentum": w[f"{side}_momentum"],
+             "components": w[f"{side}_components"]}
+            for w in mom_windows if w.get(f"{side}_momentum") is not None
+        ]
+        if not valid:
+            return None, valid
+        avg = round(sum(w["momentum"] for w in valid) / len(valid), 3)
+        return {
+            "avg": avg,
+            "by_window": valid,
+            "peak": max(valid, key=lambda w: w["momentum"])["window"],
+            "low":  min(valid, key=lambda w: w["momentum"])["window"],
+        }, valid
+
+    home_summary, home_valid = _team_summary("home")
+    away_summary, away_valid = _team_summary("away")
+
+    # Only register the metric at all if AT LEAST ONE side produced a
+    # usable reading -- mirrors the old "if valid_mom" guard, just
+    # widened from one series to two so a match isn't skipped just
+    # because (for example) the away team's pressing was never observed.
+    if home_summary is not None or away_summary is not None:
         metrics.append(make_metric(
             "momentum_score", "match", ["pressing","build_up","shape"],
-            {"avg": avg_mom,
-             "by_window": valid_mom,
-             "peak": max(valid_mom, key=lambda w: w["momentum"])["window"],
-             "low":  min(valid_mom, key=lambda w: w["momentum"])["window"]},
-            "profile", "repeated_pattern", 0.50, len(valid_mom),
-            "Composite momentum: pressing 35% + possession 40% + line height 25%",
-            sample_n=len(valid_mom)))
+            {"home": home_summary, "away": away_summary},
+            "profile", "repeated_pattern", 0.50,
+            max(len(home_valid), len(away_valid)),
+            "Composite momentum per team: pressing 35% + possession 40% + line height 25%",
+            sample_n=max(len(home_valid), len(away_valid))))
 
     # -- v3 Step 8 merge (block 3 of 3): register the 5 v3-distinctive
     # metric functions. Each function returns its metric dict directly
