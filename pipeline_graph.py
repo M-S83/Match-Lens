@@ -15,6 +15,7 @@ works end to end. More nodes (Tier 1 scan, escalation routing, merge,
 synthesis) get added the same way, one at a time.
 """
 
+import asyncio
 from typing import List, Optional, Literal
 from datetime import datetime, timezone
 from pydantic import BaseModel
@@ -127,7 +128,22 @@ def profile_source_node(state: PipelineState) -> dict:
 #   3. The throw-in at 12m 15s: Agent B saw it, Agent A didn't at all --
 #      a "seen by one agent only" case, the same shape as
 #      merge_dual_agents()'s partial_a_only/partial_b_only key-moment logic.
-def _stub_agent_a_response(window_id: str) -> dict:
+# WHY these two stub functions are now `async def` with a real
+# `await asyncio.sleep(...)`, instead of returning instantly: a stub
+# that returns instantly can't prove anything about concurrency -- two
+# instant calls run "in parallel" or "one after another" in the exact
+# same (near-zero) wall-clock time, so a timing test could never tell
+# the difference. The sleep stands in for the real latency a genuine
+# Claude API call would have (typically hundreds of ms to a few
+# seconds). With that real delay in place, running the two agents
+# sequentially vs. concurrently produces a MEASURABLE difference in
+# wall-clock time -- which is exactly what test_step13.py checks.
+AGENT_A_SIMULATED_LATENCY_S = 0.4
+AGENT_B_SIMULATED_LATENCY_S = 0.6
+
+
+async def _stub_agent_a_response(window_id: str) -> dict:
+    await asyncio.sleep(AGENT_A_SIMULATED_LATENCY_S)
     return {
         "formation": {
             "home": "4-3-3",
@@ -148,7 +164,8 @@ def _stub_agent_a_response(window_id: str) -> dict:
     }
 
 
-def _stub_agent_b_response(window_id: str) -> dict:
+async def _stub_agent_b_response(window_id: str) -> dict:
+    await asyncio.sleep(AGENT_B_SIMULATED_LATENCY_S)
     return {
         "formation": {
             "home": "4-2-3-1",   # disagrees with Agent A on home shape
@@ -225,18 +242,28 @@ def _parse_set_pieces(raw: dict, window_id: str) -> list[SetPiece]:
     return parsed
 
 
-def agent_a_scan_node(state: PipelineState) -> dict:
+# WHY these two node functions are `async def` now, and why that's not
+# just a mechanical rename: an `async def` function's body runs on the
+# event loop, and `await`ing something that itself awaits (like our
+# stub's `asyncio.sleep`) YIELDS CONTROL back to the event loop instead
+# of blocking the whole process. That's the actual mechanism that lets
+# LangGraph run agent_a_scan and agent_b_scan concurrently below: while
+# agent_a_scan is awaiting its (simulated) network call, the event loop
+# is free to start agent_b_scan's call too, instead of sitting idle
+# until agent_a_scan finishes. A plain `def` node could never give the
+# event loop that opportunity, no matter how the graph edges are wired.
+async def agent_a_scan_node(state: PipelineState) -> dict:
     print(f"  [agent_a_scan] window {state.window_id}: running Agent A's 1fps scan (stubbed)")
-    raw = _stub_agent_a_response(state.window_id)
+    raw = await _stub_agent_a_response(state.window_id)
     return {
         "agent_a_formation": _parse_formation(raw),
         "agent_a_set_pieces": _parse_set_pieces(raw, state.window_id),
     }
 
 
-def agent_b_scan_node(state: PipelineState) -> dict:
+async def agent_b_scan_node(state: PipelineState) -> dict:
     print(f"  [agent_b_scan] window {state.window_id}: running Agent B's 1fps scan (stubbed)")
-    raw = _stub_agent_b_response(state.window_id)
+    raw = await _stub_agent_b_response(state.window_id)
     return {
         "agent_b_formation": _parse_formation(raw),
         "agent_b_set_pieces": _parse_set_pieces(raw, state.window_id),
@@ -447,19 +474,31 @@ def build_graph():
 
     graph.add_edge(START, "profile_source")
 
-    # WHY profile_source -> agent_a_scan -> agent_b_scan -> merge_dual_agents
-    # runs the two agents ONE AFTER ANOTHER rather than truly in parallel:
-    # LangGraph does support parallel fan-out (multiple edges from one
-    # node running concurrently, then converging back into a fan-in
-    # node), and that WOULD be the right optimization here since Agent A
-    # and Agent B don't depend on each other's output at all. We're
-    # deliberately not reaching for that yet -- the reconciliation logic
-    # in merge_dual_agents_node is the new concept this step, and
-    # sequential edges keep that the only new moving part. Parallel
-    # fan-out is a genuine follow-up once this is solid, not a
-    # correctness requirement now.
+    # WHY profile_source now has TWO outgoing edges (to agent_a_scan AND
+    # agent_b_scan) instead of one: this is LangGraph's fan-out pattern.
+    # A node with two outgoing edges to two different nodes means BOTH
+    # target nodes become "ready" in the same superstep -- LangGraph
+    # runs every ready node in a superstep concurrently (via the event
+    # loop, now that both are `async def`), instead of waiting for one
+    # to finish before starting the other. Agent A and Agent B never
+    # depended on each other's output -- they always read the same
+    # window's frames independently -- so this was always a valid
+    # rewiring, we just hadn't done the async conversion needed to make
+    # it actually concurrent yet (see the WHY comments on the two node
+    # functions and their stubs above).
+    #
+    # WHY merge_dual_agents now has TWO incoming edges instead of one:
+    # this is the matching fan-in. A node with multiple incoming edges
+    # only runs once ALL of its predecessors have completed -- LangGraph
+    # waits for both agent_a_scan AND agent_b_scan before running
+    # merge_dual_agents, so the reconciliation logic still always sees
+    # both agents' complete results, exactly as before. The only thing
+    # that changed is HOW those two results got produced (concurrently
+    # instead of sequentially) -- merge_dual_agents_node's own code is
+    # completely untouched.
     graph.add_edge("profile_source", "agent_a_scan")
-    graph.add_edge("agent_a_scan", "agent_b_scan")
+    graph.add_edge("profile_source", "agent_b_scan")
+    graph.add_edge("agent_a_scan", "merge_dual_agents")
     graph.add_edge("agent_b_scan", "merge_dual_agents")
 
     # WHY the conditional edge now attaches to "merge_dual_agents"

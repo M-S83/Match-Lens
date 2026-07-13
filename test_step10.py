@@ -1,10 +1,14 @@
+# WHY asyncio.run(app.ainvoke(...)) instead of app.invoke(...): see the
+# WHY comment at the top of test_step7.py -- any async node anywhere in
+# the graph forces every caller onto the async entry point.
+import asyncio
 from pipeline_graph import build_graph, PipelineState
 
 app = build_graph()
 
 print("--- test: dual-agent scan + merge on a window where the two agents disagree ---")
 w = PipelineState(window_id="09", frame_paths=["frame_09m00s.jpg"])
-result = app.invoke(w)
+result = asyncio.run(app.ainvoke(w))
 
 print("\nDisagreements logged:")
 for d in result["disagreements"]:

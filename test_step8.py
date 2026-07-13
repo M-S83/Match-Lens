@@ -1,3 +1,7 @@
+# WHY asyncio.run(app.ainvoke(...)) instead of app.invoke(...): see the
+# WHY comment at the top of test_step7.py -- any async node anywhere in
+# the graph forces every caller onto the async entry point.
+import asyncio
 from pipeline_graph import build_graph, PipelineState
 
 print("--- test 1: run the full 2-node graph (profile_source -> tier1_scan) ---")
@@ -7,7 +11,7 @@ starting_state = PipelineState(
     window_id="07",
     frame_paths=["frame_07m00s.jpg", "frame_07m30s.jpg"],
 )
-result = app.invoke(starting_state)
+result = asyncio.run(app.ainvoke(starting_state))
 
 print("\nfinal state:")
 formation = result["formation"]

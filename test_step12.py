@@ -1,3 +1,14 @@
+# WHY asyncio.run(run_match_pipeline(...)) instead of calling it
+# directly: run_match_pipeline is `async def` now, purely because
+# run_window is, purely because the window-level graph it drives
+# contains async nodes (agent_a_scan/agent_b_scan). asyncio.run() is
+# how you enter the async world from ordinary top-level script code --
+# it starts an event loop, runs the coroutine to completion, and
+# returns the plain result. Note build_match_graph()'s app.invoke(...)
+# calls below stay UNCHANGED and synchronous -- readiness_graph.py's
+# own nodes were never touched, so that graph has no async nodes and
+# no reason to switch entry points.
+import asyncio
 import json
 import os
 import tempfile
@@ -50,7 +61,7 @@ print("--- test 1: all 3 windows succeed -> aggregation should report 3/3, then 
 match_dir = _make_match_dir_missing_window_files()
 specs = _make_three_window_specs()
 
-window_results = run_match_pipeline(match_dir, specs)
+window_results = asyncio.run(run_match_pipeline(match_dir, specs))
 assert len(window_results) == 3, f"expected 3 successful windows, got {len(window_results)}"
 
 with open(os.path.join(match_dir, "window_plan.json"), encoding="utf-8") as f:
@@ -91,16 +102,21 @@ print("\n--- test 2: one window fails mid-run -> should NOT crash the whole matc
 # step's fan-in has to handle that a single-window test never faced.
 original_stub_a = pipeline_graph._stub_agent_a_response
 
-def _flaky_stub_agent_a_response(window_id: str) -> dict:
+# WHY this replacement is `async def` and does `await original_stub_a(...)`:
+# same reasoning as test_step9's patched stub -- agent_a_scan_node does
+# `raw = await _stub_agent_a_response(...)`, so whatever function sits
+# in that slot has to be awaitable. Calling the real original_stub_a
+# (itself now async) requires awaiting it too, not just calling it.
+async def _flaky_stub_agent_a_response(window_id: str) -> dict:
     if window_id == "02":
         raise RuntimeError("simulated agent failure for window 02")
-    return original_stub_a(window_id)
+    return await original_stub_a(window_id)
 
 pipeline_graph._stub_agent_a_response = _flaky_stub_agent_a_response
 try:
     match_dir_2 = _make_match_dir_missing_window_files()
     specs_2 = _make_three_window_specs()
-    window_results_2 = run_match_pipeline(match_dir_2, specs_2)
+    window_results_2 = asyncio.run(run_match_pipeline(match_dir_2, specs_2))
 finally:
     # Same finally-block discipline as synthesize_node's monkeypatch --
     # restore the real stub whether or not run_match_pipeline raised.

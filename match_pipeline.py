@@ -67,13 +67,23 @@ class WindowSpec(BaseModel):
 _window_graph = build_graph()
 
 
-def run_window(spec: WindowSpec) -> WindowResult:
+# WHY run_window is `async def` now, and why that's not optional: the
+# window-level graph it invokes now contains async nodes (agent_a_scan
+# and agent_b_scan, converted for real dual-agent concurrency -- see
+# pipeline_graph.py). LangGraph refuses .invoke() the moment ANY node
+# in a graph is async ("No synchronous function provided"), so the
+# only way to run _window_graph at all is .ainvoke(), and .ainvoke()
+# can only be awaited from inside another `async def`. This is the
+# "async all the way up" propagation in action -- run_window() itself
+# does nothing concurrent, it just has no choice but to become async
+# because the thing it calls became async.
+async def run_window(spec: WindowSpec) -> WindowResult:
     """Run ONE window through the real window-level graph and translate
     its result into a WindowResult -- the match-level record of what
     happened in this window. Raises whatever the graph raises; the
     caller (run_match_pipeline) decides how to handle a failed window,
     not this function."""
-    result = _window_graph.invoke(
+    result = await _window_graph.ainvoke(
         PipelineState(window_id=spec.window_id, frame_paths=spec.frame_paths)
     )
     return WindowResult(
@@ -106,7 +116,18 @@ def _pick_match_source_profile(results: List[WindowResult]) -> Optional[SourcePr
     return None
 
 
-def run_match_pipeline(match_dir: str, window_specs: List[WindowSpec]) -> List[WindowResult]:
+# WHY run_match_pipeline is `async def` too, purely as a consequence of
+# run_window becoming async -- and WHY it still processes windows ONE
+# AT A TIME with `await` inside a plain for loop, instead of firing all
+# of them off at once with asyncio.gather(): that would be a GENUINE
+# further optimization (N windows waiting on N concurrent LLM calls
+# instead of N sequential ones), but it's a distinct decision from
+# "become async because the graph forced it," and it changes the
+# failure-handling story too -- gather() needs return_exceptions=True
+# and a bit more care to keep the same "one bad window doesn't kill the
+# match" guarantee this loop already has. Left as a deliberate,
+# named follow-up rather than bundling it in here silently.
+async def run_match_pipeline(match_dir: str, window_specs: List[WindowSpec]) -> List[WindowResult]:
     """
     Run every window in window_specs through the real window-level
     graph, then write the match-level files that are ACTUALLY derivable
@@ -126,7 +147,7 @@ def run_match_pipeline(match_dir: str, window_specs: List[WindowSpec]) -> List[W
 
     for spec in window_specs:
         try:
-            successful.append(run_window(spec))
+            successful.append(await run_window(spec))
         except Exception as e:
             # WHY we catch Exception broadly here, not a narrower type:
             # this boundary's job is "don't let one window's failure

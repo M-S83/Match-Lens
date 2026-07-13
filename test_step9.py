@@ -1,10 +1,14 @@
+# WHY asyncio.run(app.ainvoke(...)) instead of app.invoke(...): see the
+# WHY comment at the top of test_step7.py -- any async node anywhere in
+# the graph forces every caller onto the async entry point.
+import asyncio
 from pipeline_graph import build_graph, PipelineState
 
 app = build_graph()
 
 print("--- test 1: window WITH a set piece -> should route through burst_scan ---")
 w1 = PipelineState(window_id="07", frame_paths=["frame_07m00s.jpg"])
-result1 = app.invoke(w1)
+result1 = asyncio.run(app.ainvoke(w1))
 
 sp = result1["set_pieces"][0]
 print(f"  source={sp.source!r}, burst_resolved={sp.burst_resolved}, "
@@ -25,7 +29,14 @@ print("\n--- test 2: window WITHOUT any set pieces -> should skip burst_scan ent
 # stopped doing anything, rather than failing loudly.
 import pipeline_graph
 
-def _no_set_pieces_response(window_id):
+# WHY this replacement stub is `async def` now, not a plain `def`: the
+# real agent_a_scan_node/agent_b_scan_node do `raw = await
+# _stub_agent_a_response(...)`. `await` requires something awaitable
+# (a coroutine) -- awaiting a plain dict would raise a TypeError. Any
+# monkeypatch replacing one of these stubs has to keep the same async
+# shape as the function it's replacing, exactly like a real subclass
+# overriding a method has to keep the same signature.
+async def _no_set_pieces_response(window_id):
     return {"formation": {"home": "4-3-3", "away": "4-4-2"}, "set_pieces": []}
 
 pipeline_graph._stub_agent_a_response = _no_set_pieces_response
@@ -33,7 +44,7 @@ pipeline_graph._stub_agent_b_response = _no_set_pieces_response
 app2 = build_graph()  # rebuild so the node closures pick up the patched stubs
 
 w2 = PipelineState(window_id="15", frame_paths=["frame_15m00s.jpg"])
-result2 = app2.invoke(w2)
+result2 = asyncio.run(app2.ainvoke(w2))
 print(f"  set_pieces={result2['set_pieces']}")
 assert result2["set_pieces"] == []
 print("Confirmed: with no set pieces, the graph went straight from tier1_scan to END, "
