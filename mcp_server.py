@@ -33,6 +33,7 @@ honest and more useful than shipping TWO tools where one is a facade.
 analyse_match is a deliberately named next step, not an oversight.
 """
 
+import asyncio
 import os
 from typing import List, Literal, Optional
 
@@ -40,6 +41,20 @@ from pydantic import BaseModel
 from mcp.server.fastmcp import FastMCP
 
 from readiness_graph import build_match_graph, MatchState
+
+
+# WHY this is a module-level constant instead of a get_match_report
+# parameter: the earlier version of this tool called await
+# app.ainvoke(...) with NO time limit at all -- if a real (non-stubbed)
+# LLM call inside synthesis ever hangs, the tool call hangs forever from
+# the caller's side too, with no way to distinguish "still legitimately
+# processing" from "stuck." Exposing the timeout as a tool parameter
+# would violate "design for outcomes, not operations" -- the caller
+# asking for a report shouldn't need to know or care how long our
+# internal LLM calls are allowed to take. 45s is a placeholder sized
+# around the stubbed synthesis path's own ~4s of sleep() calls plus
+# margin; this needs re-tuning once real LLM call latencies are known.
+_READINESS_TIMEOUT_S = 45.0
 
 
 # WHY this Pydantic model instead of returning a plain dict: it's the
@@ -60,8 +75,19 @@ class MatchReportResult(BaseModel):
     # processing) versus "here's your report." Collapsing all three
     # into one boolean would throw away information the caller actually
     # needs to decide what to do next.
-    status: Literal["not_started", "not_ready", "ready"]
+    status: Literal["not_started", "not_ready", "ready", "error"]
     blocking_issues: List[str] = []
+    # WHY error_message is a separate field from blocking_issues, not just
+    # another string appended to that list: blocking_issues means "the
+    # match is genuinely incomplete, this is a normal, expected state a
+    # caller can just wait and retry for." error_message means "something
+    # actually broke" (a timeout, an unexpected exception, a report file
+    # that should exist but doesn't) -- a caller needs to react to those
+    # two situations very differently (politely poll again vs. escalate
+    # to a human), so collapsing them into one list would throw away
+    # exactly the distinction that matters most for deciding what to do
+    # next.
+    error_message: Optional[str] = None
     tactical_report: Optional[str] = None
     opposition_report_home: Optional[str] = None
     opposition_report_away: Optional[str] = None
@@ -97,7 +123,11 @@ async def get_match_report(match_dir: str) -> MatchReportResult:
     or incomplete data), returns status="not_ready" with the specific
     blocking_issues instead of an error -- this is a normal, expected
     outcome for a match still being processed, not a failure. If
-    match_dir does not exist at all, returns status="not_started".
+    match_dir does not exist at all, returns status="not_started". If
+    something actually goes wrong (invalid input, a timeout, an
+    unexpected internal failure, or a report file missing despite the
+    match being ready), returns status="error" with error_message set
+    -- this is never raised as an exception to the caller.
 
     Args:
         match_dir: Path to the match's working directory (the same
@@ -112,6 +142,18 @@ async def get_match_report(match_dir: str) -> MatchReportResult:
     # on MatchReportResult.status above. Checking this first also means
     # we never even touch the readiness gate for a directory that can't
     # possibly contain anything.
+    # WHY this check exists even though get_match_report's inputSchema
+    # already requires match_dir to be a string: real testing (see the
+    # POC before this file was written) confirmed the protocol layer
+    # rejects the WRONG TYPE (an int) before our function ever runs, but
+    # an empty string "" is still a perfectly valid string, so it sails
+    # straight through schema validation. Without this check, an empty
+    # match_dir would silently fall into the not_started branch below --
+    # not a crash, but a misleading answer, since "" isn't an unknown
+    # match, it's invalid input from the caller.
+    if not match_dir.strip():
+        return MatchReportResult(status="error", error_message="match_dir must not be empty")
+
     if not os.path.isdir(match_dir):
         return MatchReportResult(status="not_started")
 
@@ -126,13 +168,61 @@ async def get_match_report(match_dir: str) -> MatchReportResult:
     # the same on-disk files, so there's no real cost to always
     # computing a fresh answer instead of trusting a cached one that
     # could be out of date if a window was reprocessed since.
+    #
+    # WHY this is now wrapped in asyncio.wait_for(...) + a broad except,
+    # when the first version of this tool called await app.ainvoke(...)
+    # directly with nothing around it: a direct call meant EITHER a
+    # hang (real LLM call stuck, no timeout) OR any unexpected exception
+    # (a corrupt JSON file, a permissions error) would propagate all the
+    # way out of get_match_report as a raw Python exception -- which our
+    # own POC testing confirmed surfaces to a caller as an opaque
+    # ToolError with a bare exception string, not something a calling
+    # model can reason about or act on cleanly. Catching it here and
+    # returning a normal MatchReportResult with status="error" keeps the
+    # tool's contract exactly what its outputSchema promises, no matter
+    # what goes wrong underneath.
     app = build_match_graph()
-    result = await app.ainvoke(MatchState(match_dir=match_dir))
+    try:
+        result = await asyncio.wait_for(
+            app.ainvoke(MatchState(match_dir=match_dir)),
+            timeout=_READINESS_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        return MatchReportResult(
+            status="error",
+            error_message=f"report generation did not finish within {_READINESS_TIMEOUT_S:.1f}s",
+        )
+    except Exception as e:
+        return MatchReportResult(
+            status="error",
+            error_message=f"unexpected failure while checking readiness/synthesis: {e}",
+        )
 
     if not result["report_ready"]:
         return MatchReportResult(
             status="not_ready",
             blocking_issues=result["blocking_issues"],
+        )
+
+    # WHY this checks synthesis_result["status"] explicitly, when the
+    # earlier version jumped straight to reading files off disk: reading
+    # readiness_graph.py closely for this hardening pass surfaced a real,
+    # pre-existing gap -- synthesize_node returns report_ready=True
+    # (set earlier by the readiness gate) even when run_synthesis()
+    # itself reports status="partial" (one of the three documents
+    # failed; see synthesis_agent.run_synthesis's per-document try/except
+    # blocks). Without this check, a partial synthesis failure would
+    # only surface once _read() below hit a genuinely missing file --
+    # this check catches it one step earlier, with a clearer message
+    # naming exactly which part of synthesis didn't complete.
+    synthesis_result = result.get("synthesis_result") or {}
+    if synthesis_result.get("status") != "complete":
+        return MatchReportResult(
+            status="error",
+            error_message=(
+                "match was marked ready but synthesis did not complete for all "
+                f"three documents (synthesis_result={synthesis_result})"
+            ),
         )
 
     # WHY we read the .md files back from disk instead of returning
@@ -143,15 +233,35 @@ async def get_match_report(match_dir: str) -> MatchReportResult:
     # wrote to match_dir. This is the same "read back what was actually
     # written, don't assume you already have it in memory" pattern
     # test_step11.py used to prove the reports genuinely landed on disk.
+    #
+    # WHY this is wrapped in its own try/except too, even AFTER the
+    # synthesis_result=="complete" check above: that check protects
+    # against the specific, known partial-synthesis gap, but a file
+    # could still vanish or become unreadable for other reasons (deleted
+    # between synthesis and this read, a permissions change, a disk
+    # error) that synthesis_result would know nothing about. Two
+    # independent checks catching two different failure sources is
+    # exactly the "belt and suspenders" reasoning behind most of the
+    # defensive checks in this function.
     def _read(fname: str) -> str:
-        with open(os.path.join(match_dir, fname), encoding="utf-8") as f:
-            return f.read()
+        try:
+            with open(os.path.join(match_dir, fname), encoding="utf-8") as f:
+                return f.read()
+        except OSError as e:
+            raise RuntimeError(f"could not read {fname}: {e}") from e
+
+    try:
+        tactical_report = _read("tactical_report.md")
+        opposition_report_home = _read("opposition_report_home.md")
+        opposition_report_away = _read("opposition_report_away.md")
+    except RuntimeError as e:
+        return MatchReportResult(status="error", error_message=str(e))
 
     return MatchReportResult(
         status="ready",
-        tactical_report=_read("tactical_report.md"),
-        opposition_report_home=_read("opposition_report_home.md"),
-        opposition_report_away=_read("opposition_report_away.md"),
+        tactical_report=tactical_report,
+        opposition_report_home=opposition_report_home,
+        opposition_report_away=opposition_report_away,
     )
 
 

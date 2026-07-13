@@ -55,8 +55,14 @@ assert report_tool.inputSchema["properties"]["match_dir"]["type"] == "string"
 # values: this proves FastMCP actually read MatchReportResult's fields
 # and Literal[...] type, not just "some dict came back" -- the schema a
 # calling model sees is genuinely generated from our Pydantic model.
+# WHY this now expects 4 values, not 3: hardening (test_step15.py) added
+# a fourth status, "error", for genuine failures (timeouts, unexpected
+# exceptions, a report file missing despite ready status) distinct from
+# "not_ready" (a normal, expected incomplete-data state). This assertion
+# is deliberately kept in sync with mcp_server.py's real Literal values
+# rather than hand-copied, so it breaks loudly if they ever drift apart.
 assert set(report_tool.outputSchema["properties"]["status"]["enum"]) == {
-    "not_started", "not_ready", "ready",
+    "not_started", "not_ready", "ready", "error",
 }
 print("Confirmed: the tool is discoverable via the standard MCP tools/list call, and its input/output "
       "schemas were generated automatically from get_match_report's type hints and MatchReportResult -- "
