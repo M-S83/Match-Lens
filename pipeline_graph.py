@@ -37,6 +37,28 @@ class PipelineState(BaseModel):
     frame_paths: List[str] = []
 
     source_profile: Optional[SourceProfile] = None
+
+    # WHY these four "agent_a_*" / "agent_b_*" fields exist even though
+    # they never appear in a final report: not every state field has to
+    # be a finished, user-facing result. These are SCRATCH fields --
+    # their only job is letting agent_a_scan_node and agent_b_scan_node
+    # each write down their own independent reading, so merge_dual_agents_node
+    # has something to compare a moment later. Once merged, `formation`
+    # and `set_pieces` below are the only fields anything downstream
+    # (burst_scan, reports) should ever read.
+    agent_a_formation: Optional[Formation] = None
+    agent_b_formation: Optional[Formation] = None
+    agent_a_set_pieces: List[SetPiece] = []
+    agent_b_set_pieces: List[SetPiece] = []
+
+    # WHY a plain list of strings, mirroring merge_utils.py's own
+    # `review_required` list almost exactly: when two independent
+    # readings disagree and we don't have (or don't trust) a rule to
+    # pick a winner, the honest move is to surface it for a human to
+    # look at -- not silently discard one agent's reading. This list is
+    # that surfaced record.
+    disagreements: List[str] = []
+
     formation: Optional[Formation] = None
     set_pieces: List[SetPiece] = []
 
@@ -91,7 +113,21 @@ def profile_source_node(state: PipelineState) -> dict:
 # graph will need a parsing/adapter step exactly like this one -- raw
 # dict in, validated model out -- so it's worth seeing that step clearly
 # even while the LLM call itself is stubbed.
-def _stub_structural_llm_response(window_id: str) -> dict:
+# WHY there are TWO stub functions now, not one: they stand in for two
+# genuinely independent LLM calls over the same window -- same frames,
+# same prompt, but a fresh model context each time, the same way two
+# human analysts watching the same replay can walk away with slightly
+# different reads. To make that realistic (and to give us something
+# real to reconcile), these stubs deliberately disagree in three ways
+# that mirror real disagreement patterns:
+#   1. Home formation: "4-3-3" vs "4-2-3-1" -- a genuine categorical
+#      disagreement, the kind merge_categorical() exists to resolve.
+#   2. The corner at 7m 02s: both agents saw it (this is the "agreed
+#      existence, disagreed detail" case) but disagree on marking.
+#   3. The throw-in at 12m 15s: Agent B saw it, Agent A didn't at all --
+#      a "seen by one agent only" case, the same shape as
+#      merge_dual_agents()'s partial_a_only/partial_b_only key-moment logic.
+def _stub_agent_a_response(window_id: str) -> dict:
     return {
         "formation": {
             "home": "4-3-3",
@@ -108,6 +144,35 @@ def _stub_structural_llm_response(window_id: str) -> dict:
                 "marking": "zonal",   # note: raw schema still says "marking", not "marking_system"
                 "outcome": "cleared_near_post",
             }
+        ],
+    }
+
+
+def _stub_agent_b_response(window_id: str) -> dict:
+    return {
+        "formation": {
+            "home": "4-2-3-1",   # disagrees with Agent A on home shape
+            "away": "4-4-2",     # agrees with Agent A
+            "home_formation_basis": "confirmed_from_frames",
+            "away_formation_basis": "confirmed_from_frames",
+        },
+        "set_pieces": [
+            {
+                "timestamp": "7m 02s",          # same set piece as Agent A...
+                "type": "corner_left",
+                "team": "home_kit",
+                "delivery_zone": "near_post",
+                "marking": "man_to_man",         # ...but disagrees on marking
+                "outcome": "cleared_near_post",
+            },
+            {
+                "timestamp": "12m 15s",          # ...and saw one Agent A missed entirely
+                "type": "throw_in",
+                "team": "away_kit",
+                "delivery_zone": "attacking_third",
+                "marking": None,
+                "outcome": "retained",
+            },
         ],
     }
 
@@ -160,14 +225,148 @@ def _parse_set_pieces(raw: dict, window_id: str) -> list[SetPiece]:
     return parsed
 
 
-def tier1_scan_node(state: PipelineState) -> dict:
-    print(f"  [tier1_scan] window {state.window_id}: running 1fps structural scan (stubbed)")
-    raw = _stub_structural_llm_response(state.window_id)
+def agent_a_scan_node(state: PipelineState) -> dict:
+    print(f"  [agent_a_scan] window {state.window_id}: running Agent A's 1fps scan (stubbed)")
+    raw = _stub_agent_a_response(state.window_id)
+    return {
+        "agent_a_formation": _parse_formation(raw),
+        "agent_a_set_pieces": _parse_set_pieces(raw, state.window_id),
+    }
 
-    formation = _parse_formation(raw)
-    set_pieces = _parse_set_pieces(raw, state.window_id)
 
-    return {"formation": formation, "set_pieces": set_pieces}
+def agent_b_scan_node(state: PipelineState) -> dict:
+    print(f"  [agent_b_scan] window {state.window_id}: running Agent B's 1fps scan (stubbed)")
+    raw = _stub_agent_b_response(state.window_id)
+    return {
+        "agent_b_formation": _parse_formation(raw),
+        "agent_b_set_pieces": _parse_set_pieces(raw, state.window_id),
+    }
+
+
+# --- Dual-agent merge -----------------------------------------------------
+# WHY this port of merge_categorical keeps the SAME "prefer longer
+# string" rule as merge_utils.py, rather than something smarter: this
+# is a deliberate, honest port, not an improvement. "Longer string wins"
+# is a genuinely crude heuristic -- "4-2-3-1" beats "4-3-3" just because
+# it has more characters, with no actual tactical reasoning behind it.
+# It happens to work often enough (more detailed formations tend to have
+# longer names) but it's worth naming as a known weak spot, the same way
+# we flagged F1/F4/F5 earlier, rather than pretending it's more
+# principled than it is. A real improvement here would weigh each
+# agent's own confidence score, which the raw schema does not currently
+# give us per-field.
+def _merge_categorical(a, b) -> tuple:
+    """Returns (merged_value, agreed: bool)."""
+    if a == b:
+        return a, True
+    if a is None:
+        return b, True
+    if b is None:
+        return a, True
+    return (a if len(str(a)) >= len(str(b)) else b), False
+
+
+# WHY formation and set_pieces use TWO DIFFERENT strategies here, not
+# one shared "merge everything the same way" function: they are
+# different KINDS of disagreement. Formation is one value per side --
+# there can only be one "true" home formation, so disagreement forces a
+# pick, which is exactly what _merge_categorical's heuristic is for. Set
+# pieces are a LIST of discrete events -- there's no need to "pick one"
+# between two agents who both saw the same corner AND a throw-in the
+# other missed; both are real, so both belong in the merged list. The
+# only real decision for set pieces is de-duplication (same event, seen
+# twice) versus genuine addition (a new event, seen once). Applying
+# _merge_categorical's pick-a-winner logic to a list would be the wrong
+# tool for this job.
+def merge_dual_agents_node(state: PipelineState) -> dict:
+    disagreements = list(state.disagreements)
+
+    # -- formation: one value per side, must pick a winner on disagreement --
+    a_home = state.agent_a_formation.home.in_possession
+    b_home = state.agent_b_formation.home.in_possession
+    a_away = state.agent_a_formation.away.in_possession
+    b_away = state.agent_b_formation.away.in_possession
+
+    home_value, home_agreed = _merge_categorical(a_home, b_home)
+    away_value, away_agreed = _merge_categorical(a_away, b_away)
+
+    if not home_agreed:
+        disagreements.append(
+            f"window {state.window_id}: home formation -- "
+            f"A={a_home!r}, B={b_home!r} -> used {home_value!r} (longer-string heuristic)"
+        )
+    if not away_agreed:
+        disagreements.append(
+            f"window {state.window_id}: away formation -- "
+            f"A={a_away!r}, B={b_away!r} -> used {away_value!r} (longer-string heuristic)"
+        )
+
+    merged_formation = Formation(
+        home=TeamFormation(
+            in_possession=home_value,
+            basis="dual_agent_agreed" if home_agreed else "dual_agent_resolved",
+        ),
+        away=TeamFormation(
+            in_possession=away_value,
+            basis="dual_agent_agreed" if away_agreed else "dual_agent_resolved",
+        ),
+    )
+
+    # -- set pieces: a list, so the question is dedupe vs. genuine addition --
+    # WHY keyed by timestamp alone, not (timestamp, type): a real
+    # disagreement about WHAT happened at a given moment (one agent
+    # calls it a corner, the other a throw-in) is a more serious
+    # conflict than a marking-system mismatch, and we want that surfaced
+    # too, not silently treated as "two different events" just because
+    # the type field differs.
+    by_timestamp: dict = {}
+    for sp in state.agent_a_set_pieces:
+        by_timestamp[sp.timestamp] = {"a": sp, "b": None}
+    for sp in state.agent_b_set_pieces:
+        by_timestamp.setdefault(sp.timestamp, {"a": None, "b": None})
+        by_timestamp[sp.timestamp]["b"] = sp
+
+    merged_set_pieces = []
+    for ts, pair in by_timestamp.items():
+        sp_a, sp_b = pair["a"], pair["b"]
+        if sp_a and sp_b:
+            # Seen by both -- confirmed to exist. WHY we still don't try
+            # to pick a "best" reading field-by-field here (unlike
+            # formation): SetPiece has many fields (marking_system,
+            # delivery_zone, outcome, ...) and blindly running
+            # _merge_categorical on each would multiply disagreement
+            # noise for very little gain, when burst_scan is about to
+            # re-observe this exact set piece at 5fps anyway (see
+            # ALWAYS_ESCALATE_TYPES) and get a much more reliable answer
+            # than either 1fps agent could give.
+            merged_set_pieces.append(sp_a)
+            if sp_a.marking_system != sp_b.marking_system:
+                disagreements.append(
+                    f"window {state.window_id}: set piece at {ts} -- "
+                    f"marking A={sp_a.marking_system!r}, B={sp_b.marking_system!r} "
+                    f"-> kept A's reading (burst_scan will re-observe this anyway)"
+                )
+        elif sp_a:
+            merged_set_pieces.append(sp_a)
+            disagreements.append(
+                f"window {state.window_id}: set piece at {ts} ({sp_a.type}) "
+                f"seen by Agent A only"
+            )
+        else:
+            merged_set_pieces.append(sp_b)
+            disagreements.append(
+                f"window {state.window_id}: set piece at {ts} ({sp_b.type}) "
+                f"seen by Agent B only"
+            )
+
+    print(f"  [merge_dual_agents] window {state.window_id}: "
+          f"{len(disagreements) - len(state.disagreements)} new disagreement(s) logged")
+
+    return {
+        "formation": merged_formation,
+        "set_pieces": merged_set_pieces,
+        "disagreements": disagreements,
+    }
 
 
 # --- Escalation routing --------------------------------------------------
@@ -187,7 +386,7 @@ def tier1_scan_node(state: PipelineState) -> dict:
 # cannot capture fast-moving detail like runners or wall shape, at any
 # confidence level. So the routing question here isn't "how confident
 # are we" -- it's just "does an unresolved set piece exist at all."
-def route_after_tier1_scan(state: PipelineState) -> Literal["burst_scan", "skip"]:
+def route_after_merge(state: PipelineState) -> Literal["burst_scan", "skip"]:
     if any(not sp.burst_resolved for sp in state.set_pieces):
         return "burst_scan"
     return "skip"
@@ -241,21 +440,38 @@ def build_graph():
     graph = StateGraph(PipelineState)
 
     graph.add_node("profile_source", profile_source_node)
-    graph.add_node("tier1_scan", tier1_scan_node)
+    graph.add_node("agent_a_scan", agent_a_scan_node)
+    graph.add_node("agent_b_scan", agent_b_scan_node)
+    graph.add_node("merge_dual_agents", merge_dual_agents_node)
     graph.add_node("burst_scan", burst_scan_node)
 
     graph.add_edge(START, "profile_source")
-    graph.add_edge("profile_source", "tier1_scan")
 
-    # WHY add_conditional_edges takes THREE things: the node it's
-    # attached to ("tier1_scan"), the routing function (which returns a
-    # label), and a path_map (which node each label leads to). The
-    # path_map's values can be real node names OR the END marker --
-    # "skip" leads straight to END here because there's no more work to
-    # do on this window once tier1_scan finds nothing to escalate.
+    # WHY profile_source -> agent_a_scan -> agent_b_scan -> merge_dual_agents
+    # runs the two agents ONE AFTER ANOTHER rather than truly in parallel:
+    # LangGraph does support parallel fan-out (multiple edges from one
+    # node running concurrently, then converging back into a fan-in
+    # node), and that WOULD be the right optimization here since Agent A
+    # and Agent B don't depend on each other's output at all. We're
+    # deliberately not reaching for that yet -- the reconciliation logic
+    # in merge_dual_agents_node is the new concept this step, and
+    # sequential edges keep that the only new moving part. Parallel
+    # fan-out is a genuine follow-up once this is solid, not a
+    # correctness requirement now.
+    graph.add_edge("profile_source", "agent_a_scan")
+    graph.add_edge("agent_a_scan", "agent_b_scan")
+    graph.add_edge("agent_b_scan", "merge_dual_agents")
+
+    # WHY the conditional edge now attaches to "merge_dual_agents"
+    # instead of "tier1_scan": escalation routing reads state.set_pieces,
+    # and that field is only ever written once, by the merge node -- the
+    # two agent-scan nodes only ever write to their own agent_a_/agent_b_
+    # scratch fields. Escalation decisions must be made on the
+    # RECONCILED set of set pieces, not either agent's raw, possibly
+    # incomplete list.
     graph.add_conditional_edges(
-        "tier1_scan",
-        route_after_tier1_scan,
+        "merge_dual_agents",
+        route_after_merge,
         {"burst_scan": "burst_scan", "skip": END},
     )
     graph.add_edge("burst_scan", END)
