@@ -72,7 +72,9 @@ SCHEMA_VERSIONS = {
     "pass_sequences": "1.0",
     "shots_log": "1.0",
     "confirmation_queue": "1.0",
-    "ground_truth_check": "1.0",
+    "ground_truth_check": "1.1",  # Step 19: added fact_only_context_available /
+                                    # fact_only_no_context; "missed" now goals-only.
+
     "report_readiness": "1.0",
     "confidence_reliability_report": "1.0",
     "deep_skill_metrics": "1.0",

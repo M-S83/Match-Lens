@@ -180,21 +180,34 @@ gtr = result4["ground_truth_result"]
 assert gtr["events_checked"] == 16
 assert gtr["confirmed"] == 0
 assert gtr["partial"] == 3
-assert gtr["missed"] == 13
+# Step 19 update: "missed" is goals-only now (see ground_truth.py's
+# has_nearby_structural_context() docstring) -- all 3 real goals were found
+# (partial), so missed is correctly 0, not 13. The 13 real subs/cards land
+# in the new informational fact_only_no_context bucket instead, since this
+# match genuinely has zero key_moments of any type near any of them.
+assert gtr["missed"] == 0
+assert gtr["fact_only_context_available"] == 0
+assert gtr["fact_only_no_context"] == 13
 
 with open(stale_gt_path, encoding="utf-8") as f:
     gt_on_disk_4 = json.load(f)
-assert gt_on_disk_4["missed"] == 13, "the freshly-written file on disk should match state"
+assert gt_on_disk_4["missed"] == 0, "the freshly-written file on disk should match state"
+assert gt_on_disk_4["fact_only_no_context"] == 13
 
+# report_ready is STILL False here -- but now for only ONE real reason, not
+# two. Before Step 19, both "match_config.json not verified" AND "ground
+# truth: 13 missed" blocked this match. Step 19 removes the second reason
+# (subs/cards never needed video corroboration to be reported correctly),
+# leaving the genuinely-unrelated verification gap as the sole blocker --
+# proving the ground-truth fix didn't accidentally paper over a DIFFERENT
+# real issue this fixture also carries.
 assert result4["report_ready"] is False
-# Two real, independent blocking reasons should both appear: match_config.json
-# was never marked verified in this fixture, AND ground truth found 13 missed
-# events. Both need to be visible -- this fixture wasn't built to isolate one
-# cause, and asserting both is a stronger check than picking whichever is
-# more convenient.
 issues_lower = [i.lower() for i in result4["blocking_issues"]]
 assert any("not verified" in i for i in issues_lower), result4["blocking_issues"]
-assert any("ground truth" in i and "13" in i for i in issues_lower), result4["blocking_issues"]
+assert not any("ground truth" in i for i in issues_lower), (
+    "ground truth should no longer block this match post-Step-19 -- "
+    f"got {result4['blocking_issues']}"
+)
 # WHY .get() here, not result4["synthesis_result"]: LangGraph's invoke()
 # only returns channels that were actually written by some node during this
 # run -- synthesize_node never ran on the insufficient_data path, so the
@@ -207,8 +220,9 @@ assert result4.get("synthesis_result") is None, \
     "synthesize_node should never have run -- this match routed to insufficient_data"
 print("Confirmed: running the REAL Gorleston vs Tilbury match data through the full match graph "
       "(ground_truth -> readiness_gate -> insufficient_data) reproduces the exact real numbers "
-      "(16 checked, 0 confirmed, 3 partial, 13 missed) that were previously only ever reached by "
-      "calling build_ground_truth_check() directly in test_step16 -- proving the new node in the "
-      "graph is wired to the same real function, not a parallel copy of its logic.")
+      "(16 checked, 0 confirmed, 3 partial, 0 missed post-Step-19, 13 fact_only_no_context) that "
+      "were previously only ever reached by calling build_ground_truth_check() directly in "
+      "test_step16 -- proving the new node in the graph is wired to the same real function, not "
+      "a parallel copy of its logic.")
 
 print("\nAll test_step18 scenarios passed.")

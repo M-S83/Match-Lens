@@ -87,6 +87,79 @@ def seconds_match(ts_a: str, ts_b: str,
     return abs(a - b) <= tolerance
 
 
+def _moment_video_seconds(moment: dict, minute_to_video_s=None) -> str | None:
+    """
+    Extract a single key_moment's timestamp, converted onto the SAME
+    video-second time axis used for the known-event side.
+
+    WHY this was pulled out of find_event_in_moments() into its own
+    function: has_nearby_structural_context() (added below, for the
+    sub/card "is there any data near this timestamp" check) needs the
+    exact same conversion logic. Duplicating it inline in two places
+    would be a real bug risk -- if the conversion rule ever needs a
+    fix (as it already has once, see the WHY block on
+    find_event_in_moments), fixing only one copy would silently leave
+    the other on the old, wrong behaviour. One function, one place to
+    fix, both callers automatically consistent.
+    """
+    # WHY "timestamp" first, "minute" second: a producer that already
+    # writes pre-converted video-second timestamps (the shape this
+    # code originally assumed) must keep working unchanged; "minute"
+    # is the fallback for the real match-clock shape seen in
+    # production.
+    moment_raw = moment.get("timestamp")
+    used_minute_field = moment_raw is None
+    if used_minute_field:
+        moment_raw = moment.get("minute", "")
+
+    moment_ts = moment_raw
+    if used_minute_field and minute_to_video_s is not None:
+        raw_seconds = parse_timestamp_to_seconds(moment_raw)
+        if raw_seconds is not None:
+            # raw_seconds here is match-clock seconds elapsed (e.g.
+            # "06:00" -> 360). _minute_to_video_s expects MINUTES,
+            # and applies the real kickoff-offset math -- the same
+            # conversion already used for the known-event side --
+            # so both sides end up on the same video-time axis.
+            converted = minute_to_video_s(raw_seconds / 60.0)
+            if converted is not None:
+                moment_ts = str(converted)
+    return moment_ts
+
+
+def has_nearby_structural_context(event_ts: str, key_moments: list,
+                                   minute_to_video_s=None,
+                                   tolerance: int = TIMESTAMP_TOLERANCE_SECONDS) -> bool:
+    """
+    Return True if ANY key_moment -- of ANY type, not just a matching
+    sub/card -- falls within `tolerance` seconds of event_ts.
+
+    WHY this exists (the actual point of Step 19): a substitution or
+    card's who/when is already a certain fact from match_config.json --
+    build_ground_truth_check() does not need the video pipeline to
+    independently re-detect WHO came on for WHOM, or WHO was carded.
+    What the report-writing prompt (see synthesis_agent.py's "Tactical
+    Variation and Substitutions" and "Key Moments" section specs)
+    actually needs is whether there is ANY observed structural data
+    close enough in time to that fact for the model to say something
+    about impact. If nothing was observed anywhere nearby, the report
+    can only state the bare fact -- which the synthesis prompt already
+    explicitly permits ("If it did not change the tactical picture
+    materially, state that."). That outcome is a legitimate "no
+    evidence available" case, not a pipeline defect -- so it must never
+    feed the same blocking counter that a genuinely undetected GOAL
+    does (goals need a deep-scan retry because build-up/shot data can't
+    come from anywhere else; a missing sub/card's "context" cannot be
+    manufactured by re-running the same scan either, so there is
+    nothing a rerun would fix).
+    """
+    for moment in key_moments:
+        moment_ts = _moment_video_seconds(moment, minute_to_video_s)
+        if seconds_match(event_ts, moment_ts, tolerance):
+            return True
+    return False
+
+
 def find_event_in_moments(event: dict, key_moments: list,
                           minute_to_video_s=None) -> dict | None:
     """
@@ -119,29 +192,7 @@ def find_event_in_moments(event: dict, key_moments: list,
     event_type = event.get("type", "").lower()
 
     for moment in key_moments:
-        # WHY "timestamp" first, "minute" second: a producer that already
-        # writes pre-converted video-second timestamps (the shape this
-        # code originally assumed) must keep working unchanged; "minute"
-        # is the fallback for the real match-clock shape seen in
-        # production.
-        moment_raw = moment.get("timestamp")
-        used_minute_field = moment_raw is None
-        if used_minute_field:
-            moment_raw = moment.get("minute", "")
-
-        moment_ts = moment_raw
-        if used_minute_field and minute_to_video_s is not None:
-            raw_seconds = parse_timestamp_to_seconds(moment_raw)
-            if raw_seconds is not None:
-                # raw_seconds here is match-clock seconds elapsed (e.g.
-                # "06:00" -> 360). _minute_to_video_s expects MINUTES,
-                # and applies the real kickoff-offset math -- the same
-                # conversion already used for the known-event side --
-                # so both sides end up on the same video-time axis.
-                converted = minute_to_video_s(raw_seconds / 60.0)
-                if converted is not None:
-                    moment_ts = str(converted)
-
+        moment_ts = _moment_video_seconds(moment, minute_to_video_s)
         moment_type = moment.get("type", "").lower()
 
         ts_ok   = seconds_match(event_ts, moment_ts)
@@ -307,11 +358,29 @@ def build_ground_truth_check(match_dir: str) -> dict:
                 )
             else:
                 status = "partial"
-        else:
+        elif event["type"] == "goal":
+            # WHY goals keep the strict missed/rerun path: the "Goals
+            # Scored" report section needs build-up chain, shot-origin
+            # zone, and pattern data that ONLY the video pipeline can
+            # supply -- match_config.json only tells us a goal happened,
+            # not how. Zero independent detection here is a genuine
+            # coverage gap a deep-scan retry could actually fix.
             status = "missed"
             rerun_needed.append(
                 f"agent_{win_id} -- {event['description']} NOT FOUND in key_moments"
             )
+        else:
+            # sub / card: the fact itself (who/when) is already certain
+            # from match_config.json, so "not found in key_moments" is
+            # NOT a defect needing a rerun -- see has_nearby_structural_
+            # context()'s docstring for the full reasoning. The only
+            # thing worth recording is whether nearby data exists for
+            # the report to reason with, purely informational.
+            if has_nearby_structural_context(event["timestamp"], key_moments,
+                                              minute_to_video_s=_minute_to_video_s):
+                status = "fact_only_context_available"
+            else:
+                status = "fact_only_no_context"
 
         results.append({
             "event":            event["description"],
@@ -325,20 +394,30 @@ def build_ground_truth_check(match_dir: str) -> dict:
         })
 
     # -- Build counts ----------------------------------------------------------
-    confirmed = sum(1 for r in results if r["status"] == "confirmed")
-    partial   = sum(1 for r in results if r["status"] == "partial")
-    missed    = sum(1 for r in results if r["status"] == "missed")
+    # WHY "missed" now only ever counts goals (by construction of the loop
+    # above): build_readiness_check.py reads this exact field to decide
+    # whether to block the pipeline. Keeping the field NAME the same but
+    # narrowing its MEANING to "goals with zero independent evidence"
+    # means the existing blocking logic becomes correct automatically,
+    # with no separate field or extra wiring needed downstream.
+    confirmed         = sum(1 for r in results if r["status"] == "confirmed")
+    partial           = sum(1 for r in results if r["status"] == "partial")
+    missed            = sum(1 for r in results if r["status"] == "missed")
+    context_available = sum(1 for r in results if r["status"] == "fact_only_context_available")
+    no_context         = sum(1 for r in results if r["status"] == "fact_only_no_context")
 
     output = {
-        "match":           config.get("match", ""),
-        "events_checked":  len(results),
-        "confirmed":       confirmed,
-        "partial":         partial,
-        "missed":          missed,
-        "pipeline_ready":  missed == 0,
-        "results":         results,
-        "rerun_required":  rerun_needed,
-        "generated_at":    datetime.now().isoformat(),
+        "match":                       config.get("match", ""),
+        "events_checked":              len(results),
+        "confirmed":                   confirmed,
+        "partial":                     partial,
+        "missed":                      missed,
+        "fact_only_context_available": context_available,
+        "fact_only_no_context":        no_context,
+        "pipeline_ready":              missed == 0,
+        "results":                     results,
+        "rerun_required":              rerun_needed,
+        "generated_at":                datetime.now().isoformat(),
     }
 
     # -- Write output ----------------------------------------------------------
@@ -355,8 +434,15 @@ def build_ground_truth_check(match_dir: str) -> dict:
     print(f"  Partial:        {partial}")
     print(f"  Missed:         {missed}")
 
+    _ICONS = {
+        "confirmed":                   "[OK]",
+        "partial":                     "[ ]",
+        "fact_only_context_available": "[i]",  # informational, not a defect
+        "fact_only_no_context":        "[i]",  # informational, not a defect
+        "missed":                      "[X]",  # goals only -- a real gap
+    }
     for r in results:
-        icon = "[OK]" if r["status"] == "confirmed" else ("[ ]" if r["status"] == "partial" else "[X]")
+        icon = _ICONS.get(r["status"], "[X]")
         print(f"  {icon} {r['event'][:55]:<55} [{r['status']}]")
 
     if rerun_needed:
