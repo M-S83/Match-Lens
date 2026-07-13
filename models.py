@@ -147,3 +147,48 @@ class SetPiece(BaseModel):
         if not v or not re.match(r"^\d+m \d+s$", v):
             raise ValueError(f"timestamp must look like '23m 14s', got {v!r}")
         return v
+
+
+# --- Formation ------------------------------------------------------------
+# WHY this is split into two independent dimensions instead of one flat
+# string: the current code conflates WHO (home/away) with STATE (attacking
+# shape / defensive shape) -- pipeline_accessors.py's own comment admits
+# the home=in-possession, away=out-of-possession mapping is "approximate,"
+# which is wrong on any window where the away team has the ball. Splitting
+# them means each team gets its own attacking AND defensive shape --
+# correct regardless of who actually has the ball in a given window.
+class TeamFormation(BaseModel):
+    in_possession: Optional[str] = None      # attacking shape, e.g. "4-3-3"
+    out_of_possession: Optional[str] = None  # defensive shape, e.g. "4-4-2"
+    # Tracks HOW this was determined (e.g. "player_positions", "inferred") --
+    # mirrors the existing home_formation_basis/away_formation_basis fields
+    # accumulator.py already tallies, now attached to the side it describes
+    # instead of floating as a separately-named top-level field.
+    basis: Optional[str] = None
+
+    # WHY a validator here that no generic tool could write for you: a
+    # real football formation's outfield numbers must sum to 10 (11
+    # players minus the goalkeeper). "4-3-2" summing to 9 is a typo or a
+    # misread frame, not a valid formation -- this is domain knowledge,
+    # encoded once, that now protects every formation ever written by
+    # any script that uses this model.
+    @field_validator("in_possession", "out_of_possession")
+    @classmethod
+    def outfield_players_must_sum_to_ten(cls, v):
+        if v is None:
+            return v
+        parts = v.split("-")
+        if not all(p.isdigit() for p in parts):
+            raise ValueError(f"formation must be digits separated by hyphens, e.g. '4-3-3', got {v!r}")
+        total = sum(int(p) for p in parts)
+        if total != 10:
+            raise ValueError(
+                f"formation {v!r} outfield players sum to {total}, expected 10 "
+                f"(11 players minus the goalkeeper)"
+            )
+        return v
+
+
+class Formation(BaseModel):
+    home: TeamFormation
+    away: TeamFormation
