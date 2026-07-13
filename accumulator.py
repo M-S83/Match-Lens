@@ -410,6 +410,100 @@ def append_to_confirmation_queue(entries: list, queue_path: str) -> int:
     return appended
 
 
+def _extract_pressing_window(w: dict) -> dict:
+    """
+    Build the pressing_by_window entry for ONE merged window dict `w`.
+
+    Pulled out into its own function (Step 25) instead of staying inline
+    inside update_running_summary() for the same reason every other small
+    accumulator helper (_normalise_trigger, _count_defending_turnovers,
+    _derive_vertical_progression, ...) is its own function: a pure
+    dict-in/dict-out transform can be unit tested directly against known
+    inputs, without needing to write merged-window JSON to a temp file
+    and run the whole read-summary/merge/write-summary machinery just to
+    exercise ten lines of extraction logic.
+
+    WHY this replaces the old scores[]-based extraction: the structural
+    prompt (pipeline_runner_v2.py's PRESSING TRIGGER VOCABULARY section)
+    asks the vision model for exactly four pressing fields per window --
+    home_intensity, away_intensity, home_trigger, away_trigger. Checked
+    directly against a real Gorleston merged log -- the model reliably
+    returns pressing as a flat dict like {"home_intensity": 3.5,
+    "away_intensity": 4.0, "home_trigger": "cb_receiving_turned",
+    "away_trigger": "back_pass"}. There has never been a "scores" array
+    in real output -- that shape belonged to an earlier, different
+    per-event schema design, and this extraction was never updated when
+    the prompt moved to the four-field shape above. dict.get() on a
+    field that doesn't exist doesn't raise, it just returns None/[]
+    silently -- so avg_score/peak/observations were always empty for
+    every match, every window, since this was written. Two knock-on
+    effects of that dead field, both fixed by reading the real fields
+    here instead: (1) deep_skill_metrics.py's momentum split reads
+    pressing_by_window[i]["home_intensity"]/["away_intensity"] directly
+    -- those keys never existed on this dict before, so momentum's
+    pressing component silently ran on its 0.5 neutral fallback in
+    every window of every match; (2) calc_pressing_intensity()'s
+    match-wide average reads "avg_score", which was always None here,
+    so pressing_intensity_score always fell to the 0-sample fallback.
+    """
+    pressing_data = w.get("pressing", {}) if isinstance(w.get("pressing"), dict) else {}
+    home_intensity = pressing_data.get("home_intensity")
+    away_intensity = pressing_data.get("away_intensity")
+    home_trigger   = pressing_data.get("home_trigger")
+    away_trigger   = pressing_data.get("away_trigger")
+
+    # Build one trigger observation per team that reported one this window.
+    # WHY NOT run these through _normalise_trigger(): that helper predates
+    # the current 9-code canonical vocabulary and matches on substrings
+    # like "turned" to catch old free-text descriptions -- which would
+    # wrongly reclassify the real canonical code "cb_receiving_turned"
+    # as "defender_facing_own_goal" (it contains the substring "turned").
+    # home_trigger/away_trigger already arrive as canonical codes straight
+    # from the model -- the prompt explicitly forbids free text ("Do NOT
+    # invent triggers") -- so re-normalising them would introduce a new
+    # bug while fixing this one. "no_trigger_observed" is kept as a real
+    # observation (the prompt defines it as "pressing intensity was
+    # non-zero but no specific trigger pattern was identifiable" -- a
+    # meaningful finding), distinct from null ("no pressing observed
+    # at all"), which is correctly dropped, same as the old code dropped it.
+    trigger_observations = []
+    for team_label, trigger_code in (("home", home_trigger), ("away", away_trigger)):
+        if trigger_code and str(trigger_code).lower() not in ("null", "none", ""):
+            trigger_observations.append({
+                "trigger": trigger_code,
+                "team":    team_label,
+            })
+
+    # avg_score: a single match-wide pressing figure, blended from
+    # whichever of home/away intensity are present this window. This is
+    # the exact field calc_pressing_intensity() (the match-level
+    # pressing_intensity_score metric) has always read -- that function
+    # predates the per-team split added for momentum scoring and its
+    # contract hasn't changed, so a blended figure keeps it working
+    # correctly rather than requiring a second rewrite just for this fix.
+    present = [v for v in (home_intensity, away_intensity) if v is not None]
+    avg_score = round(sum(present) / len(present), 2) if present else None
+
+    return {
+        "window":         w.get("window"),
+        "agent_id":       w.get("agent_id"),
+        "home_intensity": home_intensity,
+        "away_intensity": away_intensity,
+        "avg_score":      avg_score,
+        "observations":   trigger_observations,
+        # NOTE: "peak"/"peak_ts" (peak_score/peak_timestamp) were dropped
+        # here, not just left None. The real schema has no per-window
+        # timestamped sub-events to compute a peak from -- it was
+        # designed for the same never-real scores[] array removed above.
+        # Checked before removing: nothing in the repo reads "peak" or
+        # "peak_ts" off a pressing_by_window entry (grepped across
+        # deep_skill_metrics.py, accumulator.py, synthesis_agent.py,
+        # watch_list_aggregator.py). Keeping a permanently-None field
+        # around implies data that might someday appear; it can't, so
+        # it's more honest to remove it than to keep a dead placeholder.
+    }
+
+
 def update_running_summary(merged_path: str,
                             summary_path: str,
                             queue_path: "str | None" = None) -> dict:
@@ -565,26 +659,11 @@ def update_running_summary(merged_path: str,
                 "match_state": str(ms),
             })
 
-    # Pressing -- extract trigger codes from scores array into observations
-    pressing_data = w.get("pressing", {}) if isinstance(w.get("pressing"), dict) else {}
-    trigger_observations = []
-    for score_entry in pressing_data.get("scores", []):
-        trigger = score_entry.get("trigger")
-        if trigger and str(trigger).lower() not in ("null", "none", ""):
-            trigger_code = _normalise_trigger(str(trigger))
-            trigger_observations.append({
-                "trigger":   trigger_code,
-                "timestamp": score_entry.get("frame_group", ""),
-                "score":     score_entry.get("score", 0),
-            })
-    summary["pressing_by_window"].append({
-        "window":    w.get("window"),
-        "agent_id":  w.get("agent_id"),
-        "avg_score": pressing_data.get("avg_score"),
-        "peak":      pressing_data.get("peak_score"),
-        "peak_ts":   pressing_data.get("peak_timestamp"),
-        "observations": trigger_observations,
-    })
+    # Pressing -- see _extract_pressing_window()'s docstring (Step 25) for
+    # the full reasoning: it replaces a dead extraction that read a
+    # "scores" array which never exists in real data, silently discarding
+    # every window's pressing reading for every match since it was written.
+    summary["pressing_by_window"].append(_extract_pressing_window(w))
 
     # Defensive line -- store both pct and metres
     def _pct_to_m(pct, pitch=105.0):
