@@ -192,3 +192,50 @@ class TeamFormation(BaseModel):
 class Formation(BaseModel):
     home: TeamFormation
     away: TeamFormation
+
+
+# --- WindowResult -----------------------------------------------------
+# WHY this model exists at all: it's the fix for F1. window_plan.py
+# writes a window's identifier under the key `agent_id` -- a genuinely
+# confusing name, since it sounds like it identifies an AI agent, not a
+# time window in the match. Different functions in pipeline_runner_v2.py
+# and shots_log_addition.py each guessed a different fallback order
+# between `agent_id` and a `window_id` key that's never even written --
+# and if a window dict ever legitimately had both keys (e.g. after a
+# merge), those two functions could silently disagree about which one
+# to trust, pairing the wrong prompt with the wrong frames.
+#
+# The actual fix isn't picking a "correct" name -- it's that there is
+# now exactly ONE field, with ONE name, and no fallback logic anywhere
+# that could pick a different one. We name it `window_id` because it's
+# the clearer, more accurate name for what it represents.
+class WindowResult(BaseModel):
+    window_id: str
+    start_s: float
+    end_s: float
+    half: Literal["1H", "2H"]
+    event_window: bool = False
+
+    # WHY these are all Optional, unlike window_id/start_s/end_s/half:
+    # a window might not have set pieces at all (most windows don't), and
+    # early in the pipeline a window might exist before its structural
+    # agent (SourceProfile/Formation) has run yet. Required fields should
+    # only be things that are true for every window, always.
+    source_profile: Optional[SourceProfile] = None
+    formation: Optional[Formation] = None
+    set_pieces: List[SetPiece] = []
+
+    # WHY a validator on window_id specifically: window_plan.py's own
+    # documented format is a two-digit, zero-padded sequence number
+    # (e.g. "07", not "7" or "window_7"). Enforcing the exact shape here
+    # means any script downstream that assumes zero-padding (e.g. for
+    # sorting windows as strings, or building filenames like
+    # f"agent_{window_id}_event.json") can rely on it, instead of
+    # defensively re-checking the format itself every time.
+    @field_validator("window_id")
+    @classmethod
+    def window_id_must_be_two_digit_zero_padded(cls, v: str) -> str:
+        import re
+        if not re.match(r"^\d{2}$", v):
+            raise ValueError(f"window_id must be a two-digit zero-padded number, e.g. '07', got {v!r}")
+        return v
