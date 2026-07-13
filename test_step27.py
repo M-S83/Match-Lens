@@ -38,23 +38,21 @@ REAL_MATCH_DIR = os.path.join(
 
 class TestWritebackIntegrityRealGap(unittest.TestCase):
     """
-    Proves the bug is real: right now, BEFORE any fix is applied, the real
-    match directory has 10 resolved-but-unmerged set-piece confirmations.
-    This test reads the REAL match_dir directly (read-only -- it never
-    writes to it), so it will only pass while the gap genuinely exists.
+    Step 27 originally proved the bug was real here: BEFORE the fix was
+    applied, the real match directory had 10 resolved-but-unmerged
+    set-piece confirmations (gap_count == 10, merged_count == 0). That real
+    recovery has since been run against the actual match directory (not a
+    copy), so this test now serves as a REGRESSION GUARD instead: it proves
+    the gap stays fixed and doesn't silently reopen. This test reads the
+    REAL match_dir directly (read-only -- it never writes to it).
     """
 
-    def test_real_match_currently_has_ten_unmerged_bursts(self):
+    def test_real_match_gap_stays_closed_after_recovery(self):
         result = check_writeback_integrity(REAL_MATCH_DIR)
         self.assertEqual(result["resolved_count"], 10)
-        self.assertEqual(result["gap_count"], 10)
-        self.assertEqual(result["merged_count"], 0)
-        # Every gap item should carry a real timestamp/team, not None --
-        # confirms the matching logic actually looked at real items rather
-        # than degenerately matching everything.
-        for item in result["gap_items"]:
-            self.assertIsNotNone(item["timestamp"])
-            self.assertIsNotNone(item["team"])
+        self.assertEqual(result["gap_count"], 0)
+        self.assertEqual(result["merged_count"], 10)
+        self.assertEqual(result["gap_items"], [])
 
 
 class TestWritebackIntegrityEdgeCases(unittest.TestCase):
@@ -145,20 +143,40 @@ class TestReadinessCheckSurfacesGap(unittest.TestCase):
     """
 
     def test_real_match_readiness_is_blocked_by_writeback_gap(self):
-        # Run against a throwaway copy of the real match, exactly as it
-        # stands right now (with the gap still present) -- proves the
-        # readiness gate correctly flips to NOT READY because of this
-        # specific new check, on real data.
+        # The real match's gap has since been fixed for real (Step 27's
+        # recovery ran against the actual match directory, not a copy), so
+        # we can no longer rely on the real data having a gap to test
+        # against. Instead, take a throwaway copy of the (now-fixed) real
+        # match and artificially reopen ONE gap by flipping a single
+        # set_piece record's burst_resolved back to False -- simulating
+        # exactly the bug this step fixed -- while confirmation_queue.json
+        # (still correctly resolved: true) is left untouched. Proves the
+        # readiness gate still correctly flips to NOT READY whenever this
+        # specific mismatch exists, regardless of the real match's current
+        # (fixed) state.
         tmp_dir = tempfile.mkdtemp()
         shutil.copytree(REAL_MATCH_DIR, tmp_dir, dirs_exist_ok=True)
         try:
+            rs_path = os.path.join(tmp_dir, "running_summary.json")
+            with open(rs_path) as f:
+                rs = json.load(f)
+            reopened = False
+            for sp in rs.get("set_pieces", []):
+                if sp.get("burst_resolved") is True:
+                    sp["burst_resolved"] = False
+                    reopened = True
+                    break
+            self.assertTrue(reopened, "expected at least one burst_resolved:True record to reopen")
+            with open(rs_path, "w") as f:
+                json.dump(rs, f)
+
             report_ready = build_readiness_check(tmp_dir)
             with open(os.path.join(tmp_dir, "report_readiness.json")) as f:
                 readiness = json.load(f)
 
             self.assertFalse(report_ready)
             self.assertEqual(readiness["writeback_resolved_count"], 10)
-            self.assertEqual(readiness["writeback_gap_count"], 10)
+            self.assertGreaterEqual(readiness["writeback_gap_count"], 1)
             self.assertTrue(any(
                 "write-back gap" in issue.lower() for issue in readiness["blocking_issues"]
             ))

@@ -123,13 +123,24 @@ def compactness_category(score):
     return "disorganised"
 
 
-def rest_defence_category(shifts_per_window):
-    """Categorise from avg shifts per window."""
-    if shifts_per_window is None: return "unknown"
-    if shifts_per_window < 0.5:   return "very_secure"
-    if shifts_per_window < 1.0:   return "secure"
-    if shifts_per_window < 2.0:   return "moderate"
-    if shifts_per_window < 3.5:   return "vulnerable"
+def rest_defence_category(backward_rate):
+    """
+    Categorise from the fraction of window-to-window transitions where the
+    defensive line dropped deeper (backward_rate, 0-1).
+
+    Step 28: rescaled from the old "avg narrated shifts per window" scale
+    (unbounded -- a window could in theory have several narrated shifts) to
+    this bounded 0-1 rate (each transition is either backward or not, so the
+    rate can never exceed 1.0). Keeping the old thresholds (0.5/1.0/2.0/3.5)
+    unchanged after switching to a bounded signal would have made the
+    "vulnerable"/"very_vulnerable" bands permanently unreachable -- silently
+    just as broken as the bug this rescale is fixing.
+    """
+    if backward_rate is None: return "unknown"
+    if backward_rate < 0.15:  return "very_secure"
+    if backward_rate < 0.30:  return "secure"
+    if backward_rate < 0.50:  return "moderate"
+    if backward_rate < 0.70:  return "vulnerable"
     return "very_vulnerable"
 
 
@@ -1426,29 +1437,66 @@ def calc_rest_defence_security(summary):
     """
     Rest-defence security: only backward defensive line shifts indicate vulnerability.
     Forward shifts (line pushing higher) are tactically positive and not penalised.
+
+    Step 28 fix (same family as Step 22's calc_compactness fix, one layer
+    deeper): this function used to read line_height_by_window's per-window
+    "shifts" list, itself sourced from a defensive_line.notable_shifts field
+    (see accumulator.py). Two problems stacked on top of each other:
+
+      1. line_height_by_window itself is the dead field Step 22 already found
+         (avg_pct/start_pct/end_pct always null on real data) -- the live
+         field is line_height_m_by_window.
+      2. Unlike compactness, simply switching field names is NOT enough here:
+         line_height_m_by_window's own "shifts" list is ALSO always empty on
+         every real window, because notable_shifts was part of an OLDER
+         per-window extraction schema. Checking the real merged agent window
+         files directly (agent_XX_..._merged.json) confirms defensive_line
+         only ever contains home_height_pct/away_height_pct/home_descriptor/
+         away_descriptor -- notable_shifts was never carried into the current
+         schema. So total_backward was structurally guaranteed to stay 0 on
+         every match, forever -- not a stale-pointer bug fixable by a field
+         rename, but a signal source that no longer exists.
+
+    The fix: stop waiting for an LLM-narrated "notable shift" and compute the
+    signal directly from data that IS real and populated on every match --
+    line_height_m_by_window's per-window avg_pct. Comparing avg_pct between
+    consecutive windows tells us directly whether the defensive line dropped
+    deeper (backward = vulnerable, per this metric's own stated definition)
+    or held/pushed up. This is arguably a MORE honest signal than the old
+    narrative-shift-list approach ever was: it's a direct numeric comparison
+    instead of trusting a vision model to remember to narrate every shift.
+
+    Because the new signal is a 0/1-per-transition rate (bounded to [0, 1])
+    rather than an unbounded count of narrated shifts, the category
+    thresholds in rest_defence_category() were rescaled to match -- the old
+    thresholds (calibrated for values that could exceed 1.0) would have made
+    the "vulnerable"/"very_vulnerable" bands unreachable under the new,
+    correctly-bounded definition.
     """
-    line_data = summary.get("line_height_by_window", [])
-    if not line_data:
-        return 0.0, 0, 0, ["suggestive"]
-    windows        = len(line_data)
+    line_data = summary.get("line_height_m_by_window", [])
+    # Ordered list of (window_label, avg_pct) for windows that actually have a
+    # numeric line-height reading. Order matters here -- we're measuring
+    # window-to-window transitions, so we must preserve match chronology.
+    valid_points = [(w.get("window"), w.get("avg_pct"))
+                    for w in line_data if w.get("avg_pct") is not None]
+    if len(valid_points) < 2:
+        # Can't measure a "shift" with zero or one data point -- there's
+        # nothing to compare against. Honestly report "unavailable" rather
+        # than fabricating a number, same convention calc_compactness uses.
+        return 0.0, None, len(valid_points), ["suggestive"]
     total_backward = 0
-    for w in line_data:
-        for shift in w.get("shifts", []):
-            if isinstance(shift, dict):
-                from_p = shift.get("from_pct", 0)
-                to_p   = shift.get("to_pct", 0)
-                if from_p > to_p:
-                    total_backward += 1
-            elif isinstance(shift, str):
-                import re as _re2
-                nums = _re2.findall(r"(\d+(?:\.\d+)?)%", shift)
-                if len(nums) >= 2 and float(nums[0]) > float(nums[1]):
-                    total_backward += 1
-                elif not nums:
-                    total_backward += 1  # conservative if unparseable
-    backward_per_win = round(total_backward / windows, 2) if windows > 0 else 0.0
-    score = max(0.0, round(1.0 - (backward_per_win * 0.25), 2))
-    return score, backward_per_win, windows, ["repeated_pattern"]
+    total_transitions = 0
+    for (_, prev_pct), (_, next_pct) in zip(valid_points, valid_points[1:]):
+        total_transitions += 1
+        if next_pct < prev_pct:
+            # Line sits at a LOWER pct in the next window than this one --
+            # i.e. it dropped deeper / retreated. That's the "backward shift"
+            # this metric penalises. A rise (pushing higher) or a hold
+            # (equal) is not penalised, per this metric's own definition.
+            total_backward += 1
+    backward_rate = round(total_backward / total_transitions, 3) if total_transitions > 0 else 0.0
+    score = max(0.0, round(1.0 - backward_rate, 2))
+    return score, backward_rate, len(valid_points), ["repeated_pattern"]
 
 
 
@@ -2786,18 +2834,22 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
         "Progressive sequences and shot/cross-ending sequences as percentage of total",
         traceable_to=["pass_sequences"]))
 
-    v, backward_per_win, w, t = calc_rest_defence_security(summary)
-    rest_cat = rest_defence_category(backward_per_win)
+    v, backward_rate, w, t = calc_rest_defence_security(summary)
+    rest_cat = rest_defence_category(backward_rate)
     # Fix 55c: rephrase per-window prose so synthesis cannot import it
     # verbatim. The calculation_basis is read by synthesis as context;
     # "per window" leaks WINDOW LANGUAGE RULE violations into reports.
+    # Step 28: field renamed avg_backward_shifts_per_window -> backward_shift_rate_pct
+    # to match the new bounded-rate definition (was a raw shift count before;
+    # now it's "what fraction of transitions were backward", so we report it
+    # as a percentage, which is the more natural unit for a bounded rate).
     metrics.append(make_metric("rest_defence_security_score", "match", ["rest_defence"],
-        {"avg_backward_shifts_per_window": backward_per_win,
+        {"backward_shift_rate_pct": round(backward_rate * 100, 1) if backward_rate is not None else None,
          "category": rest_cat,
-         "summary": f"{backward_per_win} avg backward line shifts ({rest_cat})"},
+         "summary": f"{rest_cat} ({round(backward_rate * 100, 1) if backward_rate is not None else 'n/a'}% of phases saw the line drop deeper)"},
         "profile", t, 0.75, w,
-        "Average defensive line shifts per possession phase with categorical label",
-        traceable_to=["line_height_by_window"]))
+        "Fraction of window-to-window transitions where the defensive line height dropped, with categorical label",
+        traceable_to=["line_height_m_by_window"]))
 
     v, w, t = calc_line_height_range(summary)
     if v:
