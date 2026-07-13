@@ -15,6 +15,7 @@ import os
 import sys
 from pipeline_accessors import get_source_limitations_note
 from pipeline_schemas import stamp_schema_version
+from setpiece_writeback import check_writeback_integrity
 
 
 def build_readiness_check(match_dir: str) -> bool:
@@ -139,6 +140,26 @@ def build_readiness_check(match_dir: str) -> bool:
             f"Review source_profile.json before reporting."
         )
 
+    # -- Step 27: set-piece write-back integrity ------------------------------
+    # Catches a real, expensive failure mode we found on the Gorleston match:
+    # a set-piece burst confirmation gets paid for and resolved by the API
+    # (confirmation_queue.json says resolved: true, a real *_setpiece.json
+    # result file exists on disk), but the confirmed detail never makes it
+    # into running_summary.json's set_pieces[] -- so every downstream report
+    # is built from the crude 1fps-only version despite the richer, already-
+    # paid-for version existing right there on disk. This is a detect-and-
+    # flag check, not a root-cause fix -- writeback_burst() is idempotent, so
+    # whenever this fires, the correct response is simply to re-run
+    # writeback_all_bursts(match_dir) and re-run this readiness check.
+    writeback_check = check_writeback_integrity(match_dir)
+    writeback_gap    = writeback_check["gap_count"]
+    if writeback_gap > 0:
+        blocking.append(
+            f"Set-piece write-back gap: {writeback_gap} confirmed burst(s) "
+            f"paid for but not merged into running_summary.json -- "
+            f"re-run writeback_all_bursts(match_dir)"
+        )
+
     report_ready = len(blocking) == 0
 
     # -- Report modules available ----------------------------------------------
@@ -174,6 +195,9 @@ def build_readiness_check(match_dir: str) -> bool:
         "confirmation_skipped":     cq.get("skipped_by_cap", cq.get("skipped", 0)),
         "confirmation_goals":       cq.get("goals", 0),
         "goals_uncapped":           cq.get("goals_uncapped", False),
+        "writeback_resolved_count": writeback_check["resolved_count"],
+        "writeback_merged_count":   writeback_check["merged_count"],
+        "writeback_gap_count":      writeback_check["gap_count"],
         "report_modules_available": modules,
         "blocking_issues":          blocking,
         "warnings":                 warnings,

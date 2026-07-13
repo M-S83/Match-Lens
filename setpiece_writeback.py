@@ -281,6 +281,118 @@ def writeback_all_bursts(match_dir: str, summary_path: "str | None" = None,
     return {"applied": applied, "orphans": orphans, "errors": errors}
 
 
+def check_writeback_integrity(match_dir: str) -> dict:
+    """
+    Step 27 -- the permanent safety net for this whole module.
+
+    WHY THIS EXISTS
+    ----------------
+    We found a real case (the Gorleston vs Tilbury match) where 10 set-piece
+    bursts were paid for and successfully resolved by the API (real,
+    genuinely useful data: delivery type, runner roles, wall setup, second-
+    phase outcome -- confirmation_queue.json shows resolved: true for all
+    10, with real *_setpiece.json result files on disk), yet NONE of that
+    data was present in running_summary.json's set_pieces[] -- every entry
+    still showed the crude 1fps-only version (burst_resolved: false,
+    delivery_type: null, runners: null, ...).
+
+    We could not pin down with certainty WHY the merge was lost -- it may
+    have been a silently-swallowed exception in pipeline_runner_v2.py's
+    PHASE 3b (which wraps the whole set-piece burst phase in a broad
+    `except Exception: print(...)  # non-blocking` handler, so a real
+    failure there produces nothing but an easy-to-miss print line), or a
+    later re-run of the ordinary window-merge step that rebuilt the merged
+    window file from the original 1fps agent output and had no knowledge
+    that a burst confirmation had already been applied to it. Both are
+    plausible; we verified writeback_burst()'s own merge logic is correct
+    (it applied cleanly to a test copy of this exact real data), so the bug
+    is in WHEN/WHETHER the merge happens, not in the merge logic itself.
+
+    Rather than patch one specific guessed cause, this function is a
+    detect-and-flag check that catches the SYMPTOM regardless of root
+    cause: "we have a resolved, paid-for confirmation that isn't reflected
+    in the report-facing data." Paired with the fact that writeback_burst()
+    is already idempotent (it skips records already burst_resolved: True),
+    this turns into a safe, always-correct pattern: run this check on every
+    match (via build_readiness_check, so it happens automatically, with
+    zero human review needed -- required for the eventual unattended,
+    per-client pipeline); if it reports a gap, re-running writeback_all_bursts()
+    is always safe and always closes that specific gap.
+
+    WHAT IT DOES
+    ------------
+    For every item in confirmation_queue.json with event_type ==
+    "set_piece_delivery" and resolved == True (meaning: we already paid for
+    and received this confirmation), check whether running_summary.json's
+    matching set_piece record (same (timestamp, team) key writeback_burst()
+    itself uses) shows burst_resolved: True. Any resolved item whose summary
+    record does NOT show burst_resolved: True is a genuine gap -- money
+    already spent, value not yet delivered to the reports.
+
+    Only covers set-piece confirmations for now, since that's the one
+    burst-based confirmation flow that writes into running_summary.json's
+    set_pieces[] via this exact (timestamp, team) matching key. If another
+    item type (e.g. player-action confirmations) gains an equivalent
+    burst-merge flow in future, it will need its own branch here -- this
+    function does not currently check anything about player_escalation_queue.json.
+
+    Returns a dict: resolved_count, merged_count, gap_count, gap_items
+    (each gap item is {"timestamp":..., "team":...} for diagnostics).
+    A match with no confirmation_queue.json at all returns all-zero counts --
+    "nothing was ever queued for confirmation" is a real, valid state (not
+    an error), not a gap.
+    """
+    cq_path = os.path.join(match_dir, "confirmation_queue.json")
+    summary_path = os.path.join(match_dir, "running_summary.json")
+
+    if not os.path.exists(cq_path):
+        return {"resolved_count": 0, "merged_count": 0, "gap_count": 0, "gap_items": []}
+
+    with open(cq_path, encoding="utf-8") as f:
+        cq = json.load(f)
+
+    resolved_items = [
+        item for item in cq.get("items", [])
+        if item.get("event_type") == "set_piece_delivery" and item.get("resolved") is True
+    ]
+
+    if not resolved_items:
+        return {"resolved_count": 0, "merged_count": 0, "gap_count": 0, "gap_items": []}
+
+    # No confirmations were ever paid for, but running_summary.json is also
+    # missing entirely -- that's a much bigger problem than this function is
+    # meant to catch (build_readiness_check's own "windows incomplete" check
+    # already blocks on that). Treat every resolved item as a gap here so the
+    # caller still sees an accurate count rather than a silent divide-by-zero.
+    if not os.path.exists(summary_path):
+        gap_items = [{"timestamp": i.get("timestamp"), "team": i.get("team")} for i in resolved_items]
+        return {
+            "resolved_count": len(resolved_items),
+            "merged_count": 0,
+            "gap_count": len(gap_items),
+            "gap_items": gap_items,
+        }
+
+    with open(summary_path, encoding="utf-8") as f:
+        summary = json.load(f)
+    set_pieces = summary.get("set_pieces", [])
+
+    gap_items = []
+    for item in resolved_items:
+        ts   = item.get("timestamp")
+        team = item.get("team")
+        record = find_matching_set_piece(set_pieces, ts, team)
+        if record is None or not record.get("burst_resolved"):
+            gap_items.append({"timestamp": ts, "team": team})
+
+    return {
+        "resolved_count": len(resolved_items),
+        "merged_count":   len(resolved_items) - len(gap_items),
+        "gap_count":       len(gap_items),
+        "gap_items":       gap_items,
+    }
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:

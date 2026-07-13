@@ -346,6 +346,18 @@ def validate_set_piece(sp: dict, window_id) -> tuple:
         "corrections":          sp.get("corrections", []),
         "delivery_target_zone": sp.get("delivery_target_zone"),
         "second_phase":         sp.get("second_phase"),
+        # Step 27: these two were missing from this whitelist -- found while
+        # testing the write-back recovery fix. apply_burst_to_record() (in
+        # setpiece_writeback.py) sets burst_verdict ("confirmed" or
+        # "inconclusive") and, for inconclusive bursts, burst_rejection_reason,
+        # on every burst-resolved record. Without copying them through here,
+        # burst_resolved: True survived re-accumulation but the "was this
+        # actually confirmed, or did the model say it couldn't tell" distinction
+        # was silently lost every time running_summary.json got rebuilt --
+        # exactly the same class of bug as the main write-back gap, just one
+        # level more subtle (data loss on rebuild, not data loss on merge).
+        "burst_verdict":         sp.get("burst_verdict"),
+        "burst_rejection_reason": sp.get("burst_rejection_reason"),
     }
     return True, normalized, None
 
