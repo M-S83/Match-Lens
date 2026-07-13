@@ -8,3 +8,12 @@
 pydantic>=2.0
 langgraph
 langchain-core
+
+# WHY pinned exactly (==) instead of >= like the others: the audit already
+# flagged that langgraph/langchain-core are unpinned as a real gap. We're
+# not fixing that gap here, but we ARE avoiding repeating it for a brand
+# new dependency -- MCP's spec and SDK are still actively evolving (see
+# the training plan's Phase 5 best-practice notes on version pinning for
+# exactly this reason), so a stray upgrade silently changing tool-schema
+# generation behaviour underneath us is a real risk worth pinning against.
+mcp==1.28.1
