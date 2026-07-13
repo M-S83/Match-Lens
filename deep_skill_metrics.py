@@ -430,78 +430,272 @@ def calc_momentum_by_window(summary: dict, match_config: dict) -> list:
     return result
 
 
-def calc_substitution_impact(summary: dict, match_config: dict) -> list:
+# WHY an anchored regex instead of the old str.replace()+str.split("-")
+# parser: a window label like "2H_10-00_15-00" has a hyphen INSIDE each
+# minute-second pair, not just between the pair and the next pair. The
+# old code split on every hyphen in the string, so "05-00" (5 minutes,
+# 0 seconds) got torn into "05" and "00" as if they were two unrelated
+# numbers -- and because int("00") parses without error, the surrounding
+# bare `except: pass` had nothing to catch. It silently computed an
+# `end` of 0 for every window in the match, every time, which is why
+# calc_substitution_impact() below found zero matching windows for
+# every real substitution once the earlier crash bug was fixed --
+# checked directly: window_index() returned None for all 10 real
+# Gorleston subs before this rewrite. An anchored regex either matches
+# the exact 4-number shape or returns None outright -- no partial,
+# silently-wrong parse is possible.
+_WINDOW_LABEL_RE = re.compile(r"^([12])H_(\d+)-(\d+)_(\d+)-(\d+)$")
+
+
+def _parse_window_bounds(window_label: str):
     """
-    For each substitution, compare 3-window average before vs after
-    across pressing, possession, and line height.
+    Parse a window label into (half, start_minute, end_minute) as a float
+    minute pair, e.g. "2H_10-00_15-00" -> (2, 10.0, 15.0) and
+    "1H_45-00_48-13" -> (1, 45.0, 48.2166...). The MM-SS trailing pair is
+    minutes-and-seconds of the SAME instant, not two independent minute
+    readings, so seconds are divided by 60 and added, never read as a
+    second minute value.
+
+    Returns None if the label doesn't match the expected shape, rather
+    than guessing -- callers must treat None as "skip this window", the
+    same explicit-skip contract the rest of this file already uses for
+    unresolvable data.
     """
-    subs = []
-    for team_lineup in match_config.get("lineups", []):
-        team_name = team_lineup.get("team", {}).get("name", "")
-    # Get subs from match_config
+    m = _WINDOW_LABEL_RE.match(window_label or "")
+    if not m:
+        return None
+    half, start_min, start_sec, end_min, end_sec = (int(g) for g in m.groups())
+    start = start_min + start_sec / 60.0
+    end   = end_min + end_sec / 60.0
+    return half, start, end
+
+
+def _resolve_half_and_within_minute(elapsed_minute, match_boundaries=None):
+    """
+    Decide which half a match-elapsed minute (e.g. a substitution's
+    time.elapsed) falls in, and re-base it onto THAT half's own clock --
+    which is what window labels are anchored to ("2H_10-00_15-00" means
+    minutes 10-15 of the second half, not match minutes 55-60).
+
+    WHY this can't just be "elapsed <= 45 -> first half": real stoppage
+    time runs PAST 45 minutes while still in the first half -- this real
+    match's own windows extend to "1H_45-00_48-13" (48:13 of genuine
+    first-half stoppage). A naive elapsed<=45 split misclassifies any
+    first-half stoppage minute (46, 47, 48...) as second-half instead,
+    which then gets the wrong -45 rebase applied and searches entirely
+    the wrong half's windows. Caught directly by this step's own test
+    suite: elapsed=47 (a plausible first-half-stoppage minute) resolved
+    to "2H_00-00_05-00" under the naive split -- silently wrong, not a
+    crash, so it would never have been noticed without a test built
+    specifically to probe the 45-50 minute boundary band.
+
+    WHY reuse ground_truth.py's boundary-whistle check rather than invent
+    a different one: ground_truth.py's _minute_to_video_s() (this file's
+    sibling) already solved the exact same ambiguity for the exact same
+    reason -- match minutes are "0-45 for 1H and 45+ for 2H regardless of
+    stoppage time", so its fix converts the minute AS IF first-half and
+    checks whether that lands before or after the REAL half-time whistle
+    (match_boundaries.json's ko_1h/ht_whistle video-second timestamps).
+    Only once that would land past the whistle is it genuinely a
+    second-half minute. Reusing that check here means both files agree
+    on what "first half" means for the same match, rather than each
+    having its own, potentially-drifting definition.
+
+    Falls back to the plain elapsed<=45 split when match_boundaries.json
+    isn't available for a match (mirrors ground_truth.py's own graceful
+    default for the same missing-file case) -- a known approximation,
+    but one that still resolves correctly for every event outside the
+    narrow ~45-50 minute stoppage-ambiguity band.
+    """
+    if elapsed_minute is None:
+        return None, None
+
+    boundaries = (match_boundaries or {}).get("boundaries")
+    if boundaries:
+        try:
+            ko_1h_s = boundaries["ko_1h"]["seconds"]
+            ko_2h_s = boundaries["ko_2h"]["seconds"]
+            ht_s    = boundaries["ht_whistle"]["seconds"]
+            vs_1h   = ko_1h_s + elapsed_minute * 60
+            if vs_1h <= ht_s:
+                return 1, elapsed_minute
+            return 2, elapsed_minute - 45
+        except (KeyError, TypeError):
+            pass  # malformed boundaries file -- fall through to the plain split
+
+    return (1, elapsed_minute) if elapsed_minute <= 45 else (2, elapsed_minute - 45)
+
+
+def _window_for_match_minute(win_labels: list, elapsed_minute, match_boundaries=None):
+    """
+    Find the index (within win_labels, already time-ordered) of the
+    window whose half + minute range contains a given match-elapsed
+    minute.
+
+    WHY no `extra` (stoppage-time) field handling on the elapsed number
+    itself: checked directly -- grepped every producer in this codebase
+    for a time.extra key and found none; this pipeline's real
+    match_config.json substitutions (and goals/cards) only ever carry a
+    single `elapsed` number, with stoppage already folded into it
+    directly. _resolve_half_and_within_minute() above is what handles
+    the half-ambiguity that creates; there's no separate extra-minutes
+    field to add on top of it.
+    """
+    target_half, within_half = _resolve_half_and_within_minute(elapsed_minute, match_boundaries)
+    if target_half is None:
+        return None
+    for i, label in enumerate(win_labels):
+        bounds = _parse_window_bounds(label)
+        if bounds is None:
+            continue
+        half, start, end = bounds
+        if half == target_half and start <= within_half <= end:
+            return i
+    return None
+
+
+def calc_substitution_impact(summary: dict, match_config: dict, match_boundaries: dict = None) -> list:
+    """
+    For each substitution, compare a 3-window average before vs after,
+    split per team, using the SAME per-team momentum series Step 20
+    already built.
+
+    WHY this function existed but never ran: it was written, fully
+    formed, but never called from build_deep_skill_metrics() and never
+    registered as a metric -- the exact same producer/consumer gap
+    shape as ground_truth.py before Step 18 (a function whose params
+    promise a capability -- match_config -- that no caller ever
+    supplied). Wiring it in below is what actually lets a substitution's
+    effect reach a report.
+
+    WHY it crashed before this rewrite: checked directly by calling it
+    against the real Gorleston match -- it raised
+    `AttributeError: 'str' object has no attribute 'get'`. The old code
+    assumed sub["team"] was a nested dict (`sub.get("team", {}).get(
+    "name", "")`), copied from how goal-event scorer/assist fields are
+    shaped elsewhere. A real substitution's "team" field is a plain
+    string ("Tilbury"), and calling .get() on a string is a hard crash,
+    not a silent wrong answer. The old code also read sub["player"] and
+    sub["assist"] for the outgoing/incoming player -- goal-event field
+    names again -- when the real substitution fields are player_off and
+    player_on directly (confirmed against real match_config.json).
+
+    WHY per-team instead of one blended before/after: the whole point of
+    a substitution-impact metric is to say whether a substitution helped
+    the team that MADE it -- a single match-wide before/after number
+    (the old behaviour, reading un-split pressing_by_window/
+    line_height_by_window/possession_by_window fields) can only describe
+    the whole match getting more or less intense, exactly the same
+    attribution gap Step 20 fixed for momentum_score itself. Reusing
+    calc_momentum_by_window() here (rather than re-deriving a second,
+    independent blended reading straight from the raw fields, which is
+    what the old code did) means this metric automatically inherits
+    every future fix to the per-team momentum math instead of silently
+    drifting from it.
+
+    match_boundaries is optional and defaults to None -- passed through
+    to _window_for_match_minute() so a first-half-stoppage substitution
+    (e.g. elapsed=47) resolves to the correct half using the real
+    half-time whistle timestamp, instead of the naive elapsed<=45 split
+    silently misreading it as second-half. Callers that don't have
+    match_boundaries.json loaded still get the naive-split fallback --
+    correct for every event outside the ~45-50 minute ambiguity band.
+    """
     all_subs = match_config.get("substitutions", [])
     if not all_subs:
         return []
 
-    pb_win = {w["window"]: w.get("avg_score") for w in summary.get("pressing_by_window", []) if w.get("window")}
-    lh_win = {w["window"]: w.get("avg_pct")   for w in summary.get("line_height_by_window",[]) if w.get("window")}
-    po_win = {w["window"]: w.get("focus_pct") for w in summary.get("possession_by_window",[]) if w.get("window")}
+    home_team = summary.get("home_team", "")
+    away_team = summary.get("away_team", "")
 
-    # Fix 33b follow-up: defensive key=str. Window keys are normally label
-    # strings ("1H_00-05min") but if any agent emits an int/None we'd hit
-    # the same str-vs-int collision the previous L293 fix addressed.
-    windows_ordered = sorted(pb_win.keys(), key=str)
+    momentum_by_window = calc_momentum_by_window(summary, match_config)
+    win_labels  = [w["window"] for w in momentum_by_window]
+    by_label    = {w["window"]: w for w in momentum_by_window}
 
-    def window_index(win_list, target_minute):
-        # Very rough: find windows near the target minute
-        for i, w in enumerate(win_list):
-            parts = w.replace("1H_","").replace("2H_","").split("-")
-            try:
-                start = int(parts[0].split("_")[-1])
-                end   = int(parts[1].split("_")[0]) if len(parts) > 1 else start + 5
-                if start <= target_minute <= end:
-                    return i
-            except:
-                pass
-        return None
+    def side_snapshot(win_list, side):
+        # side is "home", "away", or None (substituting team couldn't be
+        # matched to either roster name -- see the None branch below).
+        # None is propagated as an all-None snapshot rather than
+        # guessing a side, the same explicit-uncertainty contract
+        # _momentum_component() already uses for missing readings.
+        if side is None:
+            return {"momentum": None, "pressing": None, "line_height": None, "possession": None}
+        mom, press, line, poss = [], [], [], []
+        for wl in win_list:
+            w = by_label.get(wl)
+            if w is None:
+                continue
+            m = w.get(f"{side}_momentum")
+            if m is not None:
+                mom.append(m)
+            comps = w.get(f"{side}_components") or {}
+            if comps.get("pressing") is not None:
+                press.append(comps["pressing"])
+            if comps.get("line_height") is not None:
+                line.append(comps["line_height"])
+            if comps.get("possession") is not None:
+                poss.append(comps["possession"])
+
+        def avg(vals):
+            return round(sum(vals) / len(vals), 3) if vals else None
+
+        return {
+            "momentum":    avg(mom),
+            "pressing":    avg(press),
+            "line_height": avg(line),
+            "possession":  avg(poss),
+        }
 
     impacts = []
     for sub in all_subs:
-        minute = sub.get("time", {}).get("elapsed", 0)
-        team   = sub.get("team", {}).get("name", "")
-        player_off = sub.get("player", {}).get("name", "?")
-        player_on  = sub.get("assist", {}).get("name", "?")
+        minute     = (sub.get("time") or {}).get("elapsed", 0)
+        team       = sub.get("team", "")          # real shape: plain string
+        player_off = sub.get("player_off", "?")    # real field name
+        player_on  = sub.get("player_on", "?")     # real field name
 
-        idx = window_index(windows_ordered, minute)
+        idx = _window_for_match_minute(win_labels, minute, match_boundaries)
         if idx is None:
             continue
 
-        before_windows = windows_ordered[max(0, idx-3):idx]
-        after_windows  = windows_ordered[idx:min(len(windows_ordered), idx+3)]
+        before_windows = win_labels[max(0, idx - 3):idx]
+        after_windows  = win_labels[idx:min(len(win_labels), idx + 3)]
 
-        def avg_metric(win_list, metric_dict):
-            vals = [metric_dict.get(w) for w in win_list if metric_dict.get(w) is not None]
-            return round(sum(vals)/len(vals), 2) if vals else None
+        if team == home_team:
+            sub_side, opp_side = "home", "away"
+        elif team == away_team:
+            sub_side, opp_side = "away", "home"
+        else:
+            # Data inconsistency: the sub's team name matches neither
+            # roster name. Recording team_momentum_shift as None here
+            # (rather than guessing a side) keeps a bad name from ever
+            # silently attributing a shift to the wrong team.
+            sub_side = opp_side = None
+
+        before = {"home": side_snapshot(before_windows, "home"),
+                  "away": side_snapshot(before_windows, "away")}
+        after  = {"home": side_snapshot(after_windows, "home"),
+                  "away": side_snapshot(after_windows, "away")}
+
+        team_momentum_shift = None
+        if sub_side is not None:
+            b, a = before[sub_side]["momentum"], after[sub_side]["momentum"]
+            if b is not None and a is not None:
+                team_momentum_shift = round(a - b, 3)
 
         impacts.append({
-            "minute":     minute,
-            "team":       team,
-            "player_off": player_off,
-            "player_on":  player_on,
-            "before": {
-                "pressing":   avg_metric(before_windows, pb_win),
-                "line_height":avg_metric(before_windows, lh_win),
-                "possession": avg_metric(before_windows, po_win),
-            },
-            "after": {
-                "pressing":   avg_metric(after_windows, pb_win),
-                "line_height":avg_metric(after_windows, lh_win),
-                "possession": avg_metric(after_windows, po_win),
-            },
-            "windows_before": before_windows,
-            "windows_after":  after_windows,
+            "minute":              minute,
+            "team":                team,
+            "player_off":          player_off,
+            "player_on":           player_on,
+            "substituting_side":   sub_side,   # "home" / "away" / None
+            "before":              before,      # {"home": {...}, "away": {...}}
+            "after":               after,
+            "team_momentum_shift": team_momentum_shift,
+            "windows_before":      before_windows,
+            "windows_after":       after_windows,
         })
     return impacts
+
 
 def observation_grade(confidence: str, frequency: str) -> str:
     """
@@ -1026,6 +1220,12 @@ def load_pipeline_data(match_dir):
         # ground_truth.py (Step 19): a function assumes a caller wires in
         # data that, in practice, no caller ever did.
         "match_config":  load("match_config.json",        {}),
+        # Step 21: calc_substitution_impact() needs the real half-time
+        # whistle timestamp to correctly resolve first-half stoppage-time
+        # substitutions (see _resolve_half_and_within_minute()'s WHY
+        # comment) -- defaults to {} so matches without this file still
+        # work, just with the coarser elapsed<=45 fallback split.
+        "match_boundaries": load("match_boundaries.json", {}),
     }
 
 
@@ -2313,6 +2513,7 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
     source_prof   = data["source"]
     confirmations = data["confirmations"]
     match_config  = data["match_config"]
+    match_boundaries = data["match_boundaries"]  # Step 21: real half-time whistle timestamp
     source_type   = source_prof.get("source_type", "unknown")
     global_cap    = SOURCE_GLOBAL_CAP.get(source_type, 0.5)
     total_windows = summary.get("windows_complete", 1)
@@ -2668,6 +2869,32 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
             max(len(home_valid), len(away_valid)),
             "Composite momentum per team: pressing 35% + possession 40% + line height 25%",
             sample_n=max(len(home_valid), len(away_valid))))
+
+    # Substitution impact (per-team before/after momentum -- Step 21).
+    #
+    # WHY registered here at all: calc_substitution_impact() was fully
+    # written but never called anywhere in build_deep_skill_metrics() --
+    # the same producer/consumer gap Step 18 found in ground_truth.py --
+    # so a substitution's effect never reached synthesis_agent.py's
+    # report no matter how good the underlying math was. Calling it and
+    # appending its result here is what actually wires it in.
+    #
+    # WHY base_confidence is slightly lower than momentum_score's (0.45
+    # vs 0.50) despite reusing the exact same per-team momentum series:
+    # momentum_score's average is drawn from every window in the match,
+    # but each substitution_impact data point only ever averages 3
+    # windows before and 3 after that one event -- same data source,
+    # smaller sample per reading, so a slightly more conservative base
+    # confidence is the honest reflection of that, not an arbitrary
+    # number.
+    sub_impacts = calc_substitution_impact(summary, match_config, match_boundaries)
+    if sub_impacts:
+        metrics.append(make_metric(
+            "substitution_impact", "match", ["pressing","build_up","shape"],
+            sub_impacts, "profile", "repeated_pattern", 0.45, len(sub_impacts),
+            "Per-substitution 3-window average momentum before vs after, "
+            "split by the substituting team's own home/away momentum series",
+            sample_n=len(sub_impacts)))
 
     # -- v3 Step 8 merge (block 3 of 3): register the 5 v3-distinctive
     # metric functions. Each function returns its metric dict directly
