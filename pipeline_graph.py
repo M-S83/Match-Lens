@@ -15,7 +15,8 @@ works end to end. More nodes (Tier 1 scan, escalation routing, merge,
 synthesis) get added the same way, one at a time.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Literal
+from datetime import datetime, timezone
 from pydantic import BaseModel
 from langgraph.graph import StateGraph, START, END
 
@@ -169,19 +170,94 @@ def tier1_scan_node(state: PipelineState) -> dict:
     return {"formation": formation, "set_pieces": set_pieces}
 
 
+# --- Escalation routing --------------------------------------------------
+# WHY this is a *conditional* edge, the first one in this graph: every
+# edge so far has always gone to the same next node. Escalation needs
+# to ask a question first -- "does this window have anything that needs
+# a closer 5fps look?" -- and go to a DIFFERENT node depending on the
+# answer. A conditional edge is a function that looks at the current
+# state and returns a label; a path_map then says which node each label
+# leads to.
+#
+# WHY this mirrors escalation_router.py's rule exactly, with no
+# confidence threshold: ALWAYS_ESCALATE_TYPES in that file includes
+# "set_piece_delivery" with no confidence check at all -- unlike, say,
+# "pressing", which only escalates on genuine uncertainty. Set pieces
+# always escalate because 1fps sampling (one frame per second) simply
+# cannot capture fast-moving detail like runners or wall shape, at any
+# confidence level. So the routing question here isn't "how confident
+# are we" -- it's just "does an unresolved set piece exist at all."
+def route_after_tier1_scan(state: PipelineState) -> Literal["burst_scan", "skip"]:
+    if any(not sp.burst_resolved for sp in state.set_pieces):
+        return "burst_scan"
+    return "skip"
+
+
+# WHY this stub only fills fields that 1fps genuinely cannot see
+# (runners, delivery_type, bodies_in_box) rather than re-guessing
+# fields tier1_scan already set (timestamp, type, team): a real 5fps
+# burst re-watch CONFIRMS or CORRECTS the 1fps read on some fields and
+# FILLS IN others that were never observable at 1fps at all (see the
+# "1fps confirmation fields" vs "1fps could not read them" split in
+# pipeline_runner_v2.py's actual burst prompt). This stub keeps that
+# same split, rather than overwriting everything indiscriminately.
+def _stub_burst_llm_response() -> dict:
+    return {
+        "runners":       ["CB1 near post", "ST1 far post"],
+        "delivery_type": "inswinger",
+        "bodies_in_box": 6,
+    }
+
+
+# WHY model_copy(update={...}) instead of mutating the SetPiece object
+# directly: it produces a new, independently-validated object rather
+# than reaching into an existing one and changing fields in place. This
+# matters here specifically because burst_resolved/source/resolved_at
+# all need to change together, atomically, as one clear "this record
+# just got upgraded" event -- not several separate in-place edits that
+# could, in principle, be interrupted halfway through.
+def burst_scan_node(state: PipelineState) -> dict:
+    unresolved = [sp for sp in state.set_pieces if not sp.burst_resolved]
+    print(f"  [burst_scan] window {state.window_id}: escalating "
+          f"{len(unresolved)} unresolved set piece(s) to 5fps (stubbed)")
+
+    updated = []
+    for sp in state.set_pieces:
+        if sp.burst_resolved:
+            updated.append(sp)
+            continue
+        enrichment = _stub_burst_llm_response()
+        updated.append(sp.model_copy(update={
+            **enrichment,
+            "source":         "5fps_burst",
+            "burst_resolved": True,
+            "burst_fps":      5,
+            "resolved_at":    datetime.now(timezone.utc).isoformat(),
+        }))
+    return {"set_pieces": updated}
+
+
 def build_graph():
     graph = StateGraph(PipelineState)
 
     graph.add_node("profile_source", profile_source_node)
     graph.add_node("tier1_scan", tier1_scan_node)
+    graph.add_node("burst_scan", burst_scan_node)
 
-    # WHY START -> profile_source -> tier1_scan -> END: this is a
-    # straight-line chain for now (no branching yet) -- escalation
-    # routing, the next piece, is where we introduce a CONDITIONAL edge
-    # that picks between two different next nodes based on what tier1_scan
-    # found, instead of always going to the same next step.
     graph.add_edge(START, "profile_source")
     graph.add_edge("profile_source", "tier1_scan")
-    graph.add_edge("tier1_scan", END)
+
+    # WHY add_conditional_edges takes THREE things: the node it's
+    # attached to ("tier1_scan"), the routing function (which returns a
+    # label), and a path_map (which node each label leads to). The
+    # path_map's values can be real node names OR the END marker --
+    # "skip" leads straight to END here because there's no more work to
+    # do on this window once tier1_scan finds nothing to escalate.
+    graph.add_conditional_edges(
+        "tier1_scan",
+        route_after_tier1_scan,
+        {"burst_scan": "burst_scan", "skip": END},
+    )
+    graph.add_edge("burst_scan", END)
 
     return graph.compile()
