@@ -1360,7 +1360,17 @@ def calc_compactness(summary):
     A team sitting at 52m is not compact regardless of stability.
     Score 0-1: higher = more compact (line sits deeper).
     """
-    line_data = summary.get("line_height_by_window", [])
+    # Step 22 fix: line_height_by_window's avg_pct is a DEAD field on real data --
+    # the structural agent never emits a flat avg_pct for the defensive line, only
+    # home_height_pct/away_height_pct (see accumulator.py's own comment at the
+    # v3 line_height_m_by_window block). Step 20 already built the fix -- a
+    # sibling field, line_height_m_by_window, that derives avg_pct as the
+    # home/away mean -- but this function was never pointed at it, so it kept
+    # silently returning 0.0 ("least compact / fully expansive", the bottom
+    # of this metric's 0-1 scale) on every real match. It's tagged
+    # ["suggestive"] so it isn't presented as high-confidence, but it's still
+    # a made-up number rather than an honest "unavailable".
+    line_data = summary.get("line_height_m_by_window", [])
     pressing  = summary.get("pressing_by_window",   [])
     heights   = [w.get("avg_pct") for w in line_data if w.get("avg_pct") is not None]
     if not heights:
@@ -1394,10 +1404,16 @@ def calc_build_up_effectiveness(passes):
     progressive = sum(1 for s in sequences if s.get("progressive") is True)
     threats     = sum(1 for s in sequences if s.get("outcome") in ("shot", "cross", "goal"))
     # final_third: sequences that actually reached the attacking third (more meaningful than 'progressive')
+    # Step 22 fix: real pass-sequence records use start_zone/end_zone, never
+    # zone_start/zone_end. Reading the wrong key means s.get("zone_end") is
+    # always None, so this comparison was always False -- final_third silently
+    # computed as 0 on every real match, on an ACTIVE metric already shown to
+    # users (unlike the others below, this one was never on the low-confidence
+    # list, which is exactly why it's more serious: nothing flagged it as broken).
     final_third = sum(1 for s in sequences
-                      if s.get("zone_end") in ("attacking_third", "right_channel", "left_channel",
+                      if s.get("end_zone") in ("attacking_third", "right_channel", "left_channel",
                                                 "right_halfspace", "left_halfspace")
-                      and s.get("zone_start") not in ("attacking_third",))
+                      and s.get("start_zone") not in ("attacking_third",))
     total       = len(sequences)
     score            = round(min((progressive + threats) / total, 1.0), 2) if total > 0 else 0.0
     progressive_rate = round(progressive / total, 3) if total > 0 else 0.0
@@ -1437,15 +1453,22 @@ def calc_rest_defence_security(summary):
 
 
 def calc_line_height_range(summary):
-    line_data  = summary.get("line_height_by_window", [])
+    # Step 22 fix: same root cause as calc_compactness above -- switch from the
+    # dead line_height_by_window (avg_pct always None on real data) to
+    # line_height_m_by_window (avg_pct derived from home/away height by
+    # accumulator.py's Step 20 fix). One difference from the old field: the
+    # new field never had start_pct/end_pct keys either (accumulator.py never
+    # wrote them -- they were dead in the OLD field too, always None), so we
+    # only collect avg_pct per window now. That's still enough to compute a
+    # genuine highest-window-vs-lowest-window range across all 21 windows.
+    line_data  = summary.get("line_height_m_by_window", [])
     if not line_data:
         return None, 0, ["suggestive"]
     all_values = []
     for w in line_data:
-        for field in ("avg_pct", "start_pct", "end_pct"):
-            v = w.get(field)
-            if v is not None:
-                all_values.append(v)
+        v = w.get("avg_pct")
+        if v is not None:
+            all_values.append(v)
         for shift in w.get("shifts", []):
             if isinstance(shift, dict):
                 for key in ("from_pct", "to_pct", "pct"):
@@ -1498,9 +1521,15 @@ def calc_width_usage(passes):
         return 0.0, 0, ["suggestive"], "none"
     wide_keywords = ("left_channel", "right_channel", "left_flank", "right_flank",
                      "left_wide", "right_wide", "wide_left", "wide_right")
+    # Step 22 fix: real pass-sequence records key these start_zone/end_zone,
+    # not zone_start/zone_end -- reading the wrong key made zone_wide always 0,
+    # which silently forced every real match onto the inferior
+    # cross_outcomes_proxy fallback method below instead of the more accurate
+    # zone_labels method. Real data does contain left_channel/right_channel
+    # labels, so the accurate method is usable once the key is fixed.
     zone_wide = sum(1 for s in sequences
-                    if any(kw in str(s.get("zone_start", "")).lower() or
-                           kw in str(s.get("zone_end", "")).lower()
+                    if any(kw in str(s.get("start_zone", "")).lower() or
+                           kw in str(s.get("end_zone", "")).lower()
                            for kw in wide_keywords))
     cross_wide = sum(1 for s in sequences if s.get("outcome") == "cross")
     wide_count = zone_wide if zone_wide > 0 else cross_wide
@@ -1686,12 +1715,22 @@ def calc_chance_creation_profile(summary, passes):
 
 # Baseline routes that every team uses -- exclude from predictability
 # since they reflect the shape of football, not tactical predictability
+# Step 22 fix: these tuples used the bare word "middle", but the real zone
+# vocabulary produced by the structural agent is "middle_third" (confirmed via
+# grep: every real start_zone/end_zone value is attacking_third, middle_third,
+# defending_third, left_channel, right_channel, or central_channel -- "middle"
+# by itself never appears). This wasn't just inert -- it actively broke the
+# baseline-route exclusion below: with "middle", real (start,end) pairs like
+# ("defending_third", "middle_third") never matched any BASELINE_ROUTES tuple,
+# so almost every sequence touching midfield was wrongly treated as
+# "non-baseline" (293 of 364 real sequences, instead of the genuine 78) --
+# diluting the very signal this metric exists to isolate.
 BASELINE_ROUTES = {
-    ("defending_third", "middle"),
-    ("middle", "attacking_third"),
+    ("defending_third", "middle_third"),
+    ("middle_third", "attacking_third"),
     ("defending_third", "defending_third"),
-    ("middle", "middle"),
-    ("attacking_third", "middle"),
+    ("middle_third", "middle_third"),
+    ("attacking_third", "middle_third"),
     ("attacking_third", "attacking_third"),
 }
 
@@ -1711,18 +1750,22 @@ def calc_pattern_reliability(passes):
     if not sequences:
         return 0.0, None, 0, 0, ["suggestive"]
 
+    # Step 22 fix: real records use start_zone/end_zone -- reading
+    # zone_start/zone_end meant this was always None, so non_baseline was
+    # always [] and this ALWAYS fell back to the full-sequence, low-power
+    # path below, silently, on every real match.
     # Try non-baseline first
     non_baseline = [s for s in sequences
-                    if (s.get("zone_start"), s.get("zone_end")) not in BASELINE_ROUTES
-                    and s.get("zone_start") and s.get("zone_end")]
+                    if (s.get("start_zone"), s.get("end_zone")) not in BASELINE_ROUTES
+                    and s.get("start_zone") and s.get("end_zone")]
 
     use_sequences = non_baseline if len(non_baseline) >= 10 else sequences
     fallback = len(non_baseline) < 10
 
     zone_pairs = Counter(
-        (s.get("zone_start"), s.get("zone_end"))
+        (s.get("start_zone"), s.get("end_zone"))
         for s in use_sequences
-        if s.get("zone_start") and s.get("zone_end")
+        if s.get("start_zone") and s.get("end_zone")
     )
     if not zone_pairs:
         return 0.0, None, 0, 0, ["suggestive"]
@@ -1744,8 +1787,12 @@ def calc_build_up_route_diversity(passes):
     sequences = passes.get("sequences", [])
     if not sequences:
         return 0.0, 0, 0, ["suggestive"]
-    zone_pairs = set((s.get("zone_start"), s.get("zone_end"))
-                     for s in sequences if s.get("zone_start") and s.get("zone_end"))
+    # Step 22 fix: same zone_start/zone_end vs real start_zone/end_zone
+    # mismatch as calc_width_usage and calc_pattern_reliability -- this made
+    # zone_pairs always empty, silently reporting 0 route diversity ("only
+    # one route ever used") on every real match regardless of actual variety.
+    zone_pairs = set((s.get("start_zone"), s.get("end_zone"))
+                     for s in sequences if s.get("start_zone") and s.get("end_zone"))
     score = round(min(len(zone_pairs) / 4.0, 1.0), 2)  # 4 = realistic max for non-baseline routes
     return score, len(sequences), len(zone_pairs), ["repeated_pattern"]
 
@@ -1873,9 +1920,19 @@ def calc_set_piece_delivery_profile(summary):
 
 def calc_attacking_support_score(passes, summary):
     threat_seqs  = [s for s in passes.get("sequences", []) if s.get("outcome") in ("shot", "cross")]
+    # shots_for/shots_against are a genuine, separate data-collection gap (the
+    # structural agent never emits a shot_attempts category at all, in any
+    # window, for any match seen so far) -- so shot_lengths is expected to
+    # stay [] until that's addressed upstream. That's fine: it's kept as a
+    # forward-compatible fallback, not the fix for this step.
     shot_lengths = [s.get("sequence_length") for s in summary.get("shots_for", []) if s.get("sequence_length")]
-    all_lengths  = [s.get("length", s.get("sequence_length")) for s in threat_seqs
-                    if s.get("length") or s.get("sequence_length")] + shot_lengths
+    # Step 22 fix: pass-sequence records don't have "length" or
+    # "sequence_length" keys at all -- the real field is "passes" (an int,
+    # 2-7 in real data, never null). Reading nonexistent keys made
+    # all_lengths always [] (plus whatever shot_lengths contributed, which is
+    # also always [] per the note above), so this metric reported
+    # "unavailable" despite 70 real shot/cross sequences sitting right there.
+    all_lengths  = [s.get("passes") for s in threat_seqs if s.get("passes")] + shot_lengths
     all_lengths  = [l for l in all_lengths if l is not None and l > 0]
     if len(all_lengths) < 2:
         return None, len(all_lengths), ["suggestive"]
@@ -2572,7 +2629,11 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
          "summary": f"defensive compactness: {compact_cat} (avg line {avg_h_m}m from own goal)"},
         "profile", t, 0.75, w,
         "Line height stability (60%) + pressing intensity (40%)",
-        traceable_to=["line_height_by_window", "pressing_by_window"]))
+        # Step 22 fix: traceable_to metadata updated to match the field the
+        # function actually reads now -- this string is shown to report
+        # readers/synthesis as "where did this number come from", so it must
+        # stay honest about the real source.
+        traceable_to=["line_height_m_by_window", "pressing_by_window"]))
 
     avg_10, avg_01, w, t = calc_pressing_intensity(summary)
     press_cat = pressing_category(avg_10)
@@ -2619,7 +2680,8 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
     metrics.append(make_metric("line_height_range", "match", ["shape"],
         v, "profile", t, 0.80, w,
         "Highest and lowest line height in metres from own goal with categorical bands",
-        traceable_to=["line_height_by_window"]))
+        # Step 22 fix: same metadata correction as compactness_score above.
+        traceable_to=["line_height_m_by_window"]))
 
     # -- Behavioural (6) ------------------------------------------------------
 
