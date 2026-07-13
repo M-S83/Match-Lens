@@ -140,15 +140,68 @@ def accumulate_pass_sequences(merged_path: str,
 
 # -- Running summary update ----------------------------------------------------
 
+# Step 24: vertical-third progression matrix, keyed by (start_index,
+# end_index) where 0=defending_third, 1=middle_third, 2=attacking_third.
+# Same shape as the abandoned zone_helpers.py's _PROGRESSION_MATRIX (that
+# module targeted a dict-shaped zone contract that never shipped), but
+# keyed on the real flat third-label strings used by this pipeline.
+_THIRD_INDEX = {"defending_third": 0, "middle_third": 1, "attacking_third": 2}
+
+_PROGRESSION_MATRIX = {
+    (0, 0): "same_third",
+    (1, 1): "same_third",
+    (2, 2): "same_third",
+    (0, 1): "defending_to_middle",
+    (1, 2): "middle_to_attacking",
+    (0, 2): "defending_to_attacking",
+    (1, 0): "regression_middle_to_defending",
+    (2, 1): "regression_attacking_to_middle",
+    (2, 0): "regression_attacking_to_defending",
+}
+
+
+def _derive_vertical_progression(start_zone, end_zone):
+    """Step 24: derive a vertical_progression category directly from the
+    real flat start_zone/end_zone strings, rather than reading a
+    vertical_progression field that never exists on real sequences.
+
+    Returns 'unknown' whenever either end is not one of the three
+    vertical-third labels -- this includes real channel labels
+    (left_channel/right_channel/central_channel), which are a different
+    dimension of the same single-dimension zone taxonomy documented in
+    _count_defending_turnovers()/Step 23, and other non-third values like
+    'end_of_window' (the sequence ran out of window time rather than
+    changing zone). A sequence whose end is genuinely unknowable in this
+    dimension must not be guessed into a progression bucket."""
+    s_idx = _THIRD_INDEX.get(start_zone)
+    e_idx = _THIRD_INDEX.get(end_zone)
+    if s_idx is None or e_idx is None:
+        return "unknown"
+    return _PROGRESSION_MATRIX[(s_idx, e_idx)]
+
+
 def _count_vertical_progressions(pass_sequences):
     """Count vertical_progression values across a window's pass sequences.
 
-    v3 Step 5 helper. Returns a dict keyed by the seven progression
-    categories plus 'unknown'. Until Step 18 lands (structural agent
-    schema emitting zone_start/zone_end as dicts), every sequence
-    resolves to 'unknown' here. After Step 18, real distribution data
-    will populate this. Either way the per-window structure stays
-    consistent so downstream metric code sees the same shape."""
+    v3 Step 5 helper, fixed in Step 24. Returns a dict keyed by the seven
+    progression categories plus 'unknown'.
+
+    Original bug: this read seq.get("vertical_progression", "unknown"),
+    a field that was anticipated (from a v3 dict-shaped zone_start/zone_end
+    contract that never shipped, same root cause as Step 23's
+    _count_defending_turnovers) but never actually appears on any real
+    sequence -- so every sequence always fell into 'unknown', silently,
+    with no error and no visible sign anything was wrong.
+
+    Fix: derive the progression directly from the real start_zone/end_zone
+    flat strings via _derive_vertical_progression(). This is a PARTIAL fix
+    for the same reason as Step 23 -- the real zone taxonomy is
+    single-dimension per sequence, so a sequence labelled by channel at
+    either end (rather than by third) has a genuinely unknown vertical
+    progression and correctly lands in 'unknown' rather than being guessed
+    at. On the real Gorleston match, 305/364 sequences (83.8%) have both
+    ends labelled as thirds and get a real progression category; the
+    remaining 16.2% are honestly counted as 'unknown', not silently wrong."""
     counts = {
         "same_third":                        0,
         "defending_to_middle":               0,
@@ -160,11 +213,8 @@ def _count_vertical_progressions(pass_sequences):
         "unknown":                           0,
     }
     for seq in (pass_sequences or []):
-        vp = seq.get("vertical_progression", "unknown")
-        if vp in counts:
-            counts[vp] += 1
-        else:
-            counts["unknown"] += 1
+        vp = _derive_vertical_progression(seq.get("start_zone"), seq.get("end_zone"))
+        counts[vp] += 1
     return counts
 
 
@@ -774,11 +824,11 @@ def update_running_summary(merged_path: str,
         })
 
     # vertical_progression_counts / _totals -- read each window's
-    # pass_sequences and tally vertical_progression. Until Step 18
-    # lands these all resolve to "unknown" (see Step 4 commit
-    # 54f5e09). Per-window dict is appended either way so consumers
-    # of vertical_progression_counts see the same shape pre- and
-    # post-Step-18.
+    # pass_sequences and tally vertical_progression. Step 24: fixed to
+    # derive the category directly from the real flat start_zone/end_zone
+    # fields (see _count_vertical_progressions()'s docstring for the full
+    # reasoning, including why this is a partial -- not full -- fix, same
+    # single-dimension zone taxonomy limitation as Step 23).
     _window_pp = _count_vertical_progressions(_ps_raw)
     summary["vertical_progression_counts"].append({
         "window": w.get("window"),

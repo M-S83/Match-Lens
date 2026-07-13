@@ -2511,6 +2511,106 @@ def _metric_duel_effectiveness(summary, source_type):
     }
 
 
+def _metric_progression_directness(summary, source_type):
+    """Step 24: NEW v3 metric, built on top of the Step 24 fix to
+    vertical_progression_totals.
+
+    Why this exists: vertical_progression_totals was computed by the
+    accumulator ever since v3 Step 5, but no metric function anywhere in
+    this file ever read it -- confirmed by grepping the whole active v3
+    codebase for "progression" before writing this function. Before the
+    Step 24 accumulator fix, that data was also always wrong (every
+    sequence resolved to 'unknown'), so there was nothing worth reading
+    yet anyway. Now that the counts are real, this metric makes them
+    reportable: how often does a team that has the ball in its defending
+    or middle third actually move it forward a third, versus holding
+    it in the same third or playing it backward?
+
+    This is distinct from the existing build_up_effectiveness_score
+    (which measures reaching the final third and shot/cross conversion)
+    and pattern_reliability_score (which measures route repetition) --
+    both already exist in this file with their own calculation bases.
+    This metric is specifically about directness of vertical ball
+    progression, independent of whether it ends in a shot.
+
+    Same partial-fix caveat as defensive_third_turnover_rate (Step 23):
+    sequences with a channel label (rather than a third label) at
+    either end have a genuinely unknown progression and are excluded
+    from total_known via the 'unknown' bucket, rather than guessed at.
+    """
+    totals = summary.get("vertical_progression_totals", {})
+
+    progressed = (
+        totals.get("defending_to_middle", 0)
+        + totals.get("middle_to_attacking", 0)
+        + totals.get("defending_to_attacking", 0)
+    )
+    regressed = (
+        totals.get("regression_middle_to_defending", 0)
+        + totals.get("regression_attacking_to_middle", 0)
+        + totals.get("regression_attacking_to_defending", 0)
+    )
+    same = totals.get("same_third", 0)
+    total_known = progressed + regressed + same
+
+    if total_known < 3:
+        return _unavailable("progression_directness_score",
+                            "Fewer than 3 sequences with a known vertical progression")
+
+    rate = progressed / total_known
+
+    # Same structural gate as defensive_third_turnover_rate /
+    # between_lines_receiving_rate -- none of these three have their own
+    # entry in _source_caps_for_metric's per-metric-name table, so they
+    # all borrow the build_up_effectiveness_score gate as the closest
+    # analogous structural-limitation check for this source type.
+    downgraded, _, source_note = _source_caps_for_metric(
+        "build_up_effectiveness_score", source_type
+    )
+    partial_coverage_note = (
+        "Sequences are labelled by EITHER vertical third OR horizontal "
+        "channel at each end, never both -- sequences with a channel label "
+        "at either end (~16% on the real Gorleston match) are excluded "
+        "because their progression is genuinely unknown, not just unread. "
+        "This rate is an honest undercount of the denominator, not a "
+        "wrong one."
+    )
+    note = f"{source_note} {partial_coverage_note}" if source_note else partial_coverage_note
+
+    return {
+        "metric_name":   "progression_directness_score",
+        "analysis_scope":"match",
+        "subject_team":  "focus",
+        "value": {
+            "progressive_rate": round(rate, 2),
+            "progressed_count": progressed,
+            "regressed_count":  regressed,
+            "same_third_count": same,
+            "total_known":      total_known,
+        },
+        "value_type":              "profile",
+        "supporting_result_families": ["build_up"],
+        "evidence_tier":           "direct",
+        "confidence":              _apply_confidence_caps(
+                                       0.8, "direct", source_type,
+                                       downgraded, total_known),
+        "result_family_status":    "downgraded" if downgraded else "allowed",
+        "severely_limited":        downgraded,
+        "limitation_note":         note,
+        "windows_contributing":    summary.get("windows_complete", 0),
+        "fps_context":             "1fps observation",
+        "source_limitations":      note,
+        "calculation_basis": (
+            "Sequences whose start_zone/end_zone are both known vertical "
+            "thirds, categorised via the progression matrix (forward move, "
+            "same third, or backward move). progressive_rate = forward-move "
+            "sequences divided by all sequences with a known progression "
+            "(channel-labelled sequences excluded -- see limitation_note)."
+        ),
+        "traceable_to":            ["vertical_progression_totals"],
+    }
+
+
 def _metric_watch_list_summary(summary):
     """NEW v3 -- summarises watch_list_confirmations across all windows."""
     confirmations = summary.get("watch_list_confirmations", [])
@@ -3012,6 +3112,8 @@ def build_deep_skill_metrics(match_dir, team_label="both", confidence_level=2):
         _metric_between_lines_receiving_rate(summary, source_type)))
     metrics.append(_v3_with_sample_status(
         _metric_duel_effectiveness(summary, source_type)))
+    metrics.append(_v3_with_sample_status(
+        _metric_progression_directness(summary, source_type)))
     metrics.append(_v3_with_sample_status(
         _metric_watch_list_summary(summary)))
 
