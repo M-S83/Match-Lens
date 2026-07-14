@@ -636,6 +636,21 @@ def update_running_summary(merged_path: str,
         if _m:
             _wid = int(_m.group(1))
 
+    # Step 30: home_formation_evidence / away_formation_evidence are REQUIRED
+    # fields in the 3a structural prompt -- the model has to name the exact
+    # visible structure (e.g. "back four with two central midfielders...")
+    # that justifies its home_formation/away_formation label, specifically as
+    # an anti-hallucination discipline: a model that can't articulate real
+    # evidence is required to say so ("No confirmatory structure visible;
+    # defaulting to lineup.") rather than guess a formation with false
+    # confidence. That means real, useful evidence text gets computed on
+    # EVERY window, of EVERY match -- but this append() never carried it
+    # into formation_history, so it was silently thrown away immediately
+    # after being paid for. Same "computed but never written back" pattern
+    # as Step 27's set-piece burst gap and Step 29's shots gap.
+    _home_form_evidence = _formation.get("home_formation_evidence")
+    _away_form_evidence = _formation.get("away_formation_evidence")
+
     summary["formation_history"].append({
         "window_id":      _wid,
         "window":         w.get("window"),
@@ -647,6 +662,13 @@ def update_running_summary(merged_path: str,
         # Legacy keys preserved for any downstream consumer that reads them
         "shape":          _home_shape,
         "shape_oop":      _away_shape,
+        # Step 30: the rationale text is left None (not "", not omitted) when
+        # a window's merged file genuinely lacks it -- e.g. legacy-schema
+        # windows written before Fix-32a's evidence requirement existed --
+        # so a missing value is honestly distinguishable from an empty string
+        # the model chose to write.
+        "home_formation_evidence": _home_form_evidence if _home_form_evidence else None,
+        "away_formation_evidence": _away_form_evidence if _away_form_evidence else None,
     })
 
     # Match state (score and winning/losing at window start)
