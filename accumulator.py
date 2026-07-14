@@ -2386,6 +2386,120 @@ def build_shots_log(match_dir: str) -> dict:
     return shots_log
 
 
+def merge_confirmed_goals_into_shots(match_dir: str) -> dict:
+    """
+    Step 29: shots_for/shots_against are populated from a per-window
+    shot_attempts field the extraction agent never actually emits, in any
+    window, for any match seen so far -- a genuine, separate data-
+    collection gap (already documented, but not fixed, in
+    calc_attacking_support_score's own comment in deep_skill_metrics.py).
+    That leaves shots_for/shots_against structurally empty on every match,
+    even though we already have 100% confirmed detail on the highest-value
+    subset of shots: goals. build_shots_log() (phase 3f_shots, just above)
+    already builds shots_log.json straight from match_config.json's
+    confirmed scorer/minute facts -- that data simply never gets copied
+    into running_summary.json's shots_for/shots_against, so none of the
+    shot-based metrics in deep_skill_metrics.py or build_deep_skill_metrics_v2.py
+    ever see it, even for goals we're already completely sure happened.
+
+    This function closes exactly that gap, and no more: it merges each
+    confirmed goal from shots_log.json into shots_for/shots_against,
+    tagged honestly with evidence_grade ("A" if the event agent confirmed
+    detail, "C" if match-facts-only) and source="shots_log_goal", so any
+    consumer can tell these are goal-log entries -- team, minute, outcome
+    -- not full vision-verified shot detail. Fields we genuinely don't
+    know (origin_row/origin_column, shot_type, sequence_length,
+    sequence_start_zone) are left as None rather than guessed, matching
+    this project's established honesty convention (Steps 26-28).
+
+    This does NOT fix the underlying extraction gap for non-goal shot
+    attempts (shots that missed, were saved, or were blocked) -- that
+    still requires the extraction agent to actually emit a shot_attempts
+    field per window, which is a separate, bigger piece of upstream work.
+    This closes only the part of the gap we already have fully confirmed,
+    real data for.
+
+    Idempotent: checks for an existing shots_log_goal entry with the same
+    (minute, team) before appending, so re-running this after re-running
+    build_shots_log() never creates duplicates -- same discipline as
+    writeback_all_bursts() in setpiece_writeback.py.
+    """
+    shots_log_path = os.path.join(match_dir, "shots_log.json")
+    summary_path   = os.path.join(match_dir, "running_summary.json")
+
+    if not os.path.exists(shots_log_path):
+        return {"goals_in_log": 0, "goals_added": 0, "goals_already_present": 0,
+                "skipped_reason": "shots_log.json not found"}
+    if not os.path.exists(summary_path):
+        return {"goals_in_log": 0, "goals_added": 0, "goals_already_present": 0,
+                "skipped_reason": "running_summary.json not found"}
+
+    with open(shots_log_path, encoding="utf-8") as f:
+        shots_log = json.load(f)
+    with open(summary_path, encoding="utf-8") as f:
+        summary = json.load(f)
+
+    goals      = shots_log.get("goals", [])
+    home_team  = shots_log.get("home_team") or summary.get("home_team", "")
+    # Same focus_team-with-home_team-fallback convention already used for
+    # the (dead) shot_attempts classification block above, for consistency.
+    focus_team = summary.get("focus_team") or home_team
+
+    summary.setdefault("shots_for", [])
+    summary.setdefault("shots_against", [])
+
+    def _already_present(minute, team_name):
+        for lst in (summary["shots_for"], summary["shots_against"]):
+            for s in lst:
+                if (s.get("source") == "shots_log_goal"
+                        and s.get("minute") == minute
+                        and s.get("team") == team_name):
+                    return True
+        return False
+
+    added = 0
+    already = 0
+    for g in goals:
+        minute    = g.get("minute")
+        team_name = g.get("team_name", "")
+        if _already_present(minute, team_name):
+            already += 1
+            continue
+        shot_record = {
+            "timestamp":           f"{minute}m00s" if minute is not None else None,
+            "minute":              minute,
+            "team":                team_name,
+            "player":              g.get("player"),
+            "outcome":             "goal",
+            # Genuinely unknown from match-facts-only data -- left None
+            # rather than guessed. If the event agent DID confirm detail
+            # (evidence_grade "A"), these fields carry real values through
+            # from shots_log; otherwise they stay honestly empty.
+            "origin_zone":         g.get("origin_zone"),
+            "origin_row":          None,
+            "origin_column":       None,
+            "target_zone":         g.get("target_zone"),
+            "shot_type":           None,
+            "sequence_length":     g.get("build_up_length"),
+            "sequence_start_zone": None,
+            "set_piece":           g.get("set_piece", False),
+            "evidence_grade":      g.get("evidence_grade", "C"),
+            "source":              "shots_log_goal",
+        }
+        if team_name == focus_team:
+            summary["shots_for"].append(shot_record)
+        else:
+            summary["shots_against"].append(shot_record)
+        added += 1
+
+    if added:
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+
+    return {"goals_in_log": len(goals), "goals_added": added,
+            "goals_already_present": already}
+
+
 # ── Season aggregator ──────────────────────────────────────────────────────
 # Run separately against a directory of match directories to combine
 # all shots_log.json files into a single dataset for visualisation.

@@ -2370,6 +2370,13 @@ def run_pipeline(match_dir: str, quality: str = "standard",
         ("3e_zone_normalise", "zone_helpers",   "walk_findings_apply_zone_helpers"),
         ("3f_shots",        "accumulator",        "build_shots_log"),
         ("3f_sequences",    "accumulator",        "accumulate_all_windows"),
+        # Step 29: merge confirmed goals from shots_log.json (3f_shots,
+        # above) into running_summary.json's shots_for/shots_against. Must
+        # run AFTER 3f_sequences (accumulate_all_windows), not before --
+        # accumulate_all_windows rebuilds running_summary.json from the
+        # merged window files wholesale, which would silently wipe out any
+        # goals merged in earlier in the phase order.
+        ("3f_shots_merge",  "accumulator",        "merge_confirmed_goals_into_shots"),
         ("3h_ground_truth", "ground_truth",       "build_ground_truth_check"),
         ("3i_escalation",   "escalation_router",  "build_escalation_queue"),
         # v3 port Step 10: player-action escalation queue. Reads each
@@ -3193,7 +3200,7 @@ if __name__ == "__main__":
             # per-window reset of 3i_player_action (a WINDOW step driven by
             # 3i_player_escalation's queue output).
             for step in ["3e_merge","3e_zone_normalise",
-                         "3f_shots","3f_sequences","3g_summary",
+                         "3f_shots","3f_sequences","3f_shots_merge","3g_summary",
                          "3h_ground_truth","3i_escalation",
                          "3i_player_escalation","3j_readiness",
                          "3k_metrics","3k2_player_cards","3l_synthesis",
@@ -3222,7 +3229,7 @@ if __name__ == "__main__":
                     if wstep in state["windows"][wid]:
                         state["windows"][wid][wstep] = "pending"
             for step in ["3e_merge","3e_zone_normalise",
-                         "3f_shots","3f_sequences","3g_summary",
+                         "3f_shots","3f_sequences","3f_shots_merge","3g_summary",
                          "3h_ground_truth","3i_escalation",
                          "3i_player_escalation","3j_readiness",
                          "3k_metrics","3k2_player_cards","3l_synthesis",

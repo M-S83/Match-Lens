@@ -66,7 +66,7 @@ import sys
 
 # These are the three real, existing pipeline functions -- nothing new is
 # invented here, we're just calling them in the right order.
-from accumulator import accumulate_all_windows
+from accumulator import accumulate_all_windows, build_shots_log, merge_confirmed_goals_into_shots
 from deep_skill_metrics import build_deep_skill_metrics
 from build_readiness_check import build_readiness_check
 from ground_truth import build_ground_truth_check
@@ -93,6 +93,18 @@ def regenerate_match_artifacts(match_dir: str) -> dict:
     # matters for a match that's still mid-capture -- that's not an error
     # condition, it's an expected state during a live pipeline run.
     accumulate_result = accumulate_all_windows(match_dir)
+
+    # Step 1b (Step 29): refresh shots_log.json from current match_config.json
+    # / event agent output, then merge any confirmed goals into shots_for/
+    # shots_against. Must run AFTER accumulate_all_windows() above, not
+    # before -- accumulate_all_windows() rebuilds running_summary.json from
+    # the merged window files wholesale, which would silently wipe out any
+    # goals merged in before it ran. build_shots_log() itself only reads
+    # match_config.json/window_plan.json (not running_summary.json), so its
+    # own correctness doesn't depend on step-1 ordering -- only the merge
+    # step's target (running_summary.json) does.
+    build_shots_log(match_dir)
+    goals_merge_result = merge_confirmed_goals_into_shots(match_dir)
 
     # Step 2: deep_skill_metrics.json. Only meaningful once step 1 has
     # actually produced windows -- if there were zero merged files, running
@@ -133,6 +145,8 @@ def regenerate_match_artifacts(match_dir: str) -> dict:
         "total_sequences":   accumulate_result.get("total_sequences", 0),
         "ground_truth_missed":        gt_missed,
         "ground_truth_pipeline_ready": gt_ready,
+        "goals_merged_into_shots":    goals_merge_result.get("goals_added", 0),
+        "goals_already_in_shots":     goals_merge_result.get("goals_already_present", 0),
     }
 
 

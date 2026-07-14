@@ -1693,37 +1693,57 @@ def calc_chance_creation_profile(summary, passes):
     shots = summary.get("shots_for", [])
     seqs  = passes.get("sequences", [])
     chances = []
+    matched_seq_timestamps = []  # Step 29: track which threat_seqs got claimed by a shots_for match
     for shot in shots:
         shot_ts  = _parse_ts(shot.get("timestamp"))
         match_seq = next((s for s in seqs
                           if s.get("outcome") in ("shot", "cross", "goal")
                           and abs(_parse_ts(s.get("start_frame")) - shot_ts) < 30), None)
+        if match_seq is not None:
+            matched_seq_timestamps.append(_parse_ts(match_seq.get("start_frame")))
         chances.append({
             "timestamp":      shot.get("timestamp"),
             "origin_zone":    match_seq.get("zone_start") if match_seq else "unknown",
             "route":          _infer_route(match_seq),
             "sequence_length":shot.get("sequence_length") or
                               (match_seq.get("length") if match_seq else None),
-            "shot_zone":      shot.get("origin_column", "unknown"),
-            "shot_type":      shot.get("shot_type", "unknown"),
+            "shot_zone":      shot.get("origin_column") or "unknown",
+            "shot_type":      shot.get("shot_type") or "unknown",
             "outcome":        shot.get("outcome", "unknown"),
-            "target_zone":    shot.get("target_zone", "unknown"),
+            "target_zone":    shot.get("target_zone") or "unknown",
             "source":         "shots_for",
         })
-    if not chances:
-        threat_seqs = [s for s in seqs if s.get("outcome") in ("shot", "cross")]
-        for s in threat_seqs:
-            chances.append({
-                "timestamp":      s.get("start_frame"),
-                "origin_zone":    s.get("zone_start", "unknown"),
-                "route":          _infer_route(s),
-                "sequence_length":s.get("length"),
-                "shot_zone":      s.get("zone_end", "unknown"),
-                "shot_type":      "unknown",
-                "outcome":        s.get("outcome"),
-                "target_zone":    "unknown",
-                "source":         "threat_sequences_fallback",
-            })
+    # Step 29: shots_for used to be structurally always empty (the extraction
+    # agent never emits shot_attempts), so "if not chances" was a safe stand-
+    # in for "we have no shots_for data at all, use the pass-sequence proxy
+    # instead." Now that shots_for can be non-empty (Step 29's merge adds
+    # confirmed goals to it), that binary either/or would be a regression:
+    # 3 goal entries would fully replace 70 real threat_sequences chances
+    # instead of adding to them, making this profile LESS complete right
+    # after we made shots_for MORE complete. shots_for's goals and
+    # threat_sequences' shot/cross outcomes describe overlapping but not
+    # identical populations (goals are a subset of all shots; threat_seqs
+    # covers shots that missed/were saved too, which shots_for still can't
+    # see at all -- see the module-level note on the still-open upstream
+    # shot_attempts gap). So: always add threat_sequences chances, but skip
+    # any whose timestamp already matched a shots_for entry above, so a
+    # goal isn't double-counted as two separate "chances."
+    threat_seqs = [s for s in seqs if s.get("outcome") in ("shot", "cross")]
+    for s in threat_seqs:
+        s_ts = _parse_ts(s.get("start_frame"))
+        if any(abs(s_ts - claimed) < 30 for claimed in matched_seq_timestamps):
+            continue  # already represented via its matching shots_for/goal entry
+        chances.append({
+            "timestamp":      s.get("start_frame"),
+            "origin_zone":    s.get("zone_start", "unknown"),
+            "route":          _infer_route(s),
+            "sequence_length":s.get("length"),
+            "shot_zone":      s.get("zone_end", "unknown"),
+            "shot_type":      "unknown",
+            "outcome":        s.get("outcome"),
+            "target_zone":    "unknown",
+            "source":         "threat_sequences_fallback",
+        })
     if not chances:
         return None, 0, ["suggestive"]
     seq_lengths = [c["sequence_length"] for c in chances if c["sequence_length"]]
@@ -1751,12 +1771,32 @@ def calc_chance_creation_profile(summary, passes):
         "low_danger_chances":  low_danger,
         "high_danger_pct":     danger_pct,
         "avg_sequence_length": round(sum(seq_lengths)/len(seq_lengths), 1) if seq_lengths else None,
-        "data_source":         "shots_for" if shots else "threat_sequences_fallback",
+        # Step 29: no longer a binary either/or -- report how many of each
+        # actually made up this profile, since both sources can now
+        # genuinely contribute at once.
+        "data_source":         {
+            "shots_for_count":               sum(1 for c in chances if c["source"] == "shots_for"),
+            "threat_sequences_fallback_count": sum(1 for c in chances if c["source"] == "threat_sequences_fallback"),
+        },
         "summary":             (f"{len(chances)} chances: {danger_pct}% from high-danger zones "
                                 f"(six-yard box or penalty spot); most from {football_zone(top_origin)}"
                                 f" via {top_route} route"),
     }
-    tiers = ["direct"] if shots else ["repeated_pattern"]
+    # Step 29: tiers now reflects actual composition instead of a binary
+    # "any shots_for at all -> whole profile is direct" claim. worst_evidence_
+    # tier() (used by make_metric) takes the WORST tier present, so listing
+    # both when both are present correctly caps confidence at the fallback
+    # tier's level rather than overclaiming "direct" evidence for a profile
+    # that's mostly built from the pass-sequence proxy.
+    has_shots_for_chances = any(c["source"] == "shots_for" for c in chances)
+    has_fallback_chances  = any(c["source"] == "threat_sequences_fallback" for c in chances)
+    tiers = []
+    if has_shots_for_chances:
+        tiers.append("direct")
+    if has_fallback_chances:
+        tiers.append("repeated_pattern")
+    if not tiers:
+        tiers = ["suggestive"]
     return profile, len(chances), tiers
 
 

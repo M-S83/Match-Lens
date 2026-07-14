@@ -216,9 +216,24 @@ def _metric_build_up_effectiveness(summary, source_type):
     # Threat conversion: sequences with vertical_progression that ended in
     # shot or cross. Read this from pass_sequences if you have access to the
     # accumulated file; for now compute from running summary's recorded shots.
-    shots_from_progression = len([
-        s for s in summary.get("shots_for", []) if s.get("sequence_start_zone") == "defending_third"
-    ])
+    #
+    # Step 29: shots_for entries didn't exist at all before Step 29's
+    # merge_confirmed_goals_into_shots() wired in the confirmed goals from
+    # shots_log.json -- so this always silently returned 0, indistinguishable
+    # from a genuine "confirmed zero shots started in the defending third".
+    # Even after that fix, the goal-log entries don't carry sequence_start_zone
+    # (match-facts-only data doesn't know where the buildup started), so this
+    # can still legitimately be 0 real shots with known zone info. The fix
+    # here isn't to make the count nonzero -- it's to stop claiming a
+    # confident 0 when we actually have zero shots with ANY known zone at
+    # all. Report None (honestly unavailable) in that case instead.
+    shots_with_known_zone = [
+        s for s in summary.get("shots_for", []) if s.get("sequence_start_zone") is not None
+    ]
+    shots_from_progression = (
+        len([s for s in shots_with_known_zone if s.get("sequence_start_zone") == "defending_third"])
+        if shots_with_known_zone else None
+    )
 
     downgraded, _, note = _source_caps_for_metric(
         "build_up_effectiveness_score", source_type
